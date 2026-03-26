@@ -64,7 +64,22 @@ L'unione di questi approcci permette di coprire diverse dimensioni della zona gr
 
 ---
 
-## 4. Limiti Teorici dell'Approccio
+## 4. Correlazione Multidimensionale: Quando un Host diventa "Sospetto"
+
+Come evidenziato dall'equazione dello *Score Globale* $S(h)$, il modello non si basa sulla valutazione di una singola metrica isolata, bensì sulla loro aggregazione. 
+
+Nelle reti moderne, un singolo evento anomalo (i cosiddetti "segnali deboli") è spesso insufficiente per classificare un host come critico. Ad esempio, un *port-scan* isolato verso la rete interna potrebbe essere l'azione legittima di un amministratore di sistema o un software di *network discovery*. 
+
+Un host viene definito "sospetto" (o ad alto rischio) solo quando si verifica una **convergenza di più anomalie** su assi dimensionali diversi. Matematicamente, questa correlazione è gestita dalla somma pesata $\sum w_i \cdot M_i(h)$:
+
+* **Caso A (Segnale isolato):** Se l'host esegue unicamente una scansione di rete, si attiverà solo la relativa metrica. Lo *Score* finale $S(h)$ crescerà esclusivamente del peso assegnato a tale metrica (es. $0.15$), mantenendo l'host in una fascia di rischio bassa o accettabile.
+* **Caso B (Eventi correlati):** Se il medesimo host esegue una scansione di rete, contestualmente inizia a utilizzare una porta mai vista prima ($N \neq \emptyset$ nella *Novelty Detection*) e genera un **Eccesso Volumetrico** in uscita ($Z_{robusto} > 3$), l'equazione sommerà i pesi di tutte queste metriche. Lo *Score* $S(h)$ si avvicinerà rapidamente a $1$.
+
+È esattamente questa **correlazione di comportamenti** nella "zona grigia" che certifica il cambio di stato dell'host da "regolare" a "sospetto", permettendo di identificare pattern complessi senza fare affidamento su firme predefinite.
+
+---
+
+## 5. Limiti Teorici dell'Approccio
 
 Il modello presenta limiti intrinseci derivanti dalla sua natura di analisi passiva:
 1. **Payload Blindness:** Il modello correla esclusivamente i metadati (L3/L4 e intestazioni TLS). Flussi malevoli perfettamente mimetizzati nei volumi e nelle frequenze di un normale traffico legittimo non genereranno un $\Delta$ statistico rilevabile.
@@ -73,7 +88,7 @@ Il modello presenta limiti intrinseci derivanti dalla sua natura di analisi pass
 
 ---
 
-## 5. Obiettivi e Risultati Attesi
+## 6. Obiettivi e Risultati Attesi
 
 L'obiettivo del modello è superare i tradizionali sistemi di sicurezza basati su regole rigide (dove un evento è valutato solo come "lecito" o "illecito"), per fornire invece una valutazione quantitativa e progressiva del rischio. 
 
