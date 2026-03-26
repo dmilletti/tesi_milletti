@@ -27,12 +27,13 @@ Queste metriche valutano eventi puntuali basati su logica booleana (es. corrispo
 
 ---
 
-## 3. Calcolo delle Metriche Statistiche (Comportamento e Cambiamento)
+## 3. Calcolo delle Metriche Comportamentali (Analisi della "Zona Grigia")
 
-Le metriche statistiche valutano se l'attività attuale sia un'anomalia rispetto alla consuetudine dell'host. Questo calcolo utilizza un unico "motore matematico" diviso in tre fasi formali.
+Le metriche comportamentali non cercano minacce note (logica bianco/nero), ma esplorano la cosiddetta **"zona grigia"**: traffico apparentemente legittimo che risulta sospetto perché eccessivo, fuori orario o totalmente inedito per quello specifico host. 
+Per valutare questa tipologia di anomalie, il modello utilizza due approcci matematici distinti: l'analisi degli **scostamenti statistici** (per le variazioni quantitative) e la **Novelty Detection** (rilevamento delle novità).
 
-### Fase 3.1: Definizione del "Comportamento" (Baseline Robusta)
-Il comportamento normale dell'host per una data metrica è modellato calcolando due indicatori su una finestra temporale storica:
+### Fase 3.1: Profilazione Storica (Baseline Robusta)
+Per le variabili continue (es. volume di byte, frequenza di connessioni), il comportamento normale dell'host è modellato calcolando due indicatori su una finestra temporale storica:
 * **Mediana ($\tilde{x}$):** Rappresenta il valore centrale e tipico del traffico per quell'host.
 * **MAD (Median Absolute Deviation):** Quantifica la dispersione fisiologica dei dati rispetto alla mediana, calcolata come:
 
@@ -40,19 +41,26 @@ $$MAD = \text{Mediana}(|x_i - \tilde{x}|)$$
 
 L'utilizzo di $\tilde{x}$ e $MAD$ risulta matematicamente più solido rispetto a Media e Deviazione Standard, in quanto intrinsecamente immune ai fisiologici outlier del traffico di rete (es. picchi legittimi dovuti a download occasionali).
 
-### Fase 3.2: Misurazione del "Cambiamento" (Z-Score Robusto)
-Per misurare formalmente il cambiamento, si calcola lo scostamento dell'osservazione attuale $x$ dalla baseline, utilizzando lo **Z-Score Robusto**:
+### Fase 3.2: Misurazione dello Scostamento Statistico (Z-Score Robusto)
+Per misurare formalmente una variazione quantitativa, si calcola la distanza dell'osservazione attuale $x$ dalla baseline, utilizzando lo **Z-Score Robusto**:
 
 $$Z_{robusto} = \frac{|x - \tilde{x}|}{MAD}$$
 
-Questa equazione restituisce un **valore numerico** che indica la distanza dell'evento attuale dalla normalità.
+Questa equazione restituisce un valore numerico. Se $Z_{robusto}$ supera una soglia di tolleranza $\theta$ (es. $Z > 3$), l'evento è classificato come un'anomalia quantitativa.
 
-### Fase 3.3: Valutazione della Metrica ($M_i$)
+### Fase 3.3: Rilevamento delle Novità Assolute (Novelty Detection)
+Per valutare gli eventi "mai visti prima" (variabili discrete come nuovi IP contattati, porte o protocolli inediti), l'approccio statistico non è applicabile. Si utilizza quindi la teoria degli insiemi.
+Sia $E_{storico}$ l'insieme degli elementi (es. porte di destinazione) contattati dall'host nel periodo di profilazione, e $E_{oggi}$ l'insieme degli elementi contattati nell'osservazione odierna. La novità ($N$) è calcolata tramite l'insieme differenza:
 
-L'ultimo passaggio collega il calcolo statistico all'equazione globale del sospetto. Il valore dello Z-Score viene confrontato con una soglia di tolleranza $\theta$ (es. $Z>3$, che indica un evento statisticamente rarissimo):
+$$N = E_{oggi} \setminus E_{storico}$$
 
-* Se $Z_{robusto} > \theta$, l'anomalia è confermata e la metrica si attiva: $M_i(h) = 1$.
-* Se $Z_{robusto} <= \theta$, l'evento rientra nella normale fluttuazione: $M_i(h) = 0$. (Da valutare: $M_i$​ potrebbe anche assumere valori continui tra 0 e 1 in base all'entità del superamento della soglia).
+Se l'insieme $N$ non è vuoto ($N \neq \emptyset$), significa che l'host sta esibendo un comportamento totalmente inedito, attivando la relativa metrica di anomalia.
+
+### Fase 3.4: Applicazione alle Specifiche Metriche (Esempi)
+L'unione di questi approcci permette di coprire diverse dimensioni della zona grigia:
+* **Eccesso Volumetrico ($M_{vol}$):** Valuta picchi di traffico verso destinazioni lecite (es. un dipendente che carica 50GB di backup su un server aziendale). Il volume è lecito, ma lo $Z_{robusto}$ elevato segnala un'anomalia rispetto alla consuetudine.
+* **Novità di Servizio/Destinazione ($M_{new}$):** Valuta l'uso di nuove risorse tramite la **Novelty Detection**. Ad esempio, una stampante di rete che improvvisamente avvia una connessione verso Internet, o un PC che utilizza il protocollo FTP (porta 21) per la prima volta.
+* **Variazione dei Pattern Temporali ($M_{time}$):** Valuta il cambio di abitudini. Ad esempio, un host tipicamente attivo in orari d'ufficio che inizia a generare traffico costante alle 3 del mattino.
 
 ---
 
