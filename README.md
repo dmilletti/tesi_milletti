@@ -1,6 +1,6 @@
-# Classificazione host sospetti
+# Analisi Comportamentale degli Host e Valutazione del Rischio di Rete
 
-**Obiettivo:** Definire formalmente il livello di "sospetto" di un host all'interno di una rete attraverso un approccio non invasivo (analisi passiva del traffico), utilizzando un sistema di scoring basato su metriche deterministiche e statistiche.
+**Obiettivo:** Definire formalmente un modello matematico in grado di valutare lo stato di sicurezza di un'infrastruttura IT e rispondere alla domanda principale: "La mia rete è sicura?". Attraverso un approccio non invasivo (l'analisi passiva del traffico), il modello valuta il profilo dei singoli host unendo metriche deterministiche e statistiche. Lo scopo è andare oltre la semplice ricerca di minacce già conosciute (il classico approccio "bianco o nero"), per identificare variazioni anomale di comportamento ed eventi mai visti prima nella cosiddetta "zona grigia". In questo modo è possibile misurare il livello di anomalia del singolo nodo e, di conseguenza, calcolare il rischio dell'intera rete.
 
 ---
 
@@ -88,8 +88,25 @@ Il modello presenta limiti intrinseci derivanti dalla sua natura di analisi pass
 
 ---
 
-## 6. Obiettivi e Risultati Attesi
+## 6. Dal Singolo Host alla Rete: Valutazione della Postura di Sicurezza
 
-L'obiettivo del modello è superare i tradizionali sistemi di sicurezza basati su regole rigide (dove un evento è valutato solo come "lecito" o "illecito"), per fornire invece una valutazione quantitativa e progressiva del rischio. 
+L'obiettivo finale del modello non si limita alla classificazione del singolo nodo, ma mira a rispondere al quesito architetturale primario: *"La mia rete è sicura?"*. 
 
-Il risultato atteso è la generazione di un **Ranking di Priorità**: ordinando gli host in base al loro Score $S(h)$, si fornisce agli analisti un elenco ordinato per livello di criticità, riducendo il problema dell'affaticamento da allarmi e ottimizzando i tempi di neutralizzazione degli attacchi.
+Per perseguire questo obiettivo, lo *Score* individuale $S(h)$ funge da mattoncino fondamentale per calcolare l'**Indice di Rischio di Rete ($I_{rete}$)**.
+Poiché in ambito di sicurezza informatica la robustezza di una rete è pari a quella del suo anello più debole, l'aggregazione non può basarsi sulla semplice media aritmetica degli host (che diluirebbe un allarme critico in mezzo a migliaia di host sani).
+
+Il modello valuta la sicurezza globale della rete basandosi su due fattori derivati:
+
+1. **Il Rischio di Picco (Worst-Case Scenario):**
+   La rete è intrinsecamente insicura se anche un solo host supera una soglia critica $\tau$ (es. $\tau = 0.8$). Il primo indicatore è quindi il massimo punteggio registrato nell'intero insieme degli host $H$:
+   $$\max_{h \in H} S(h)$$
+
+2. **La Densità delle Anomalie (Systemic Spread):**
+   Se viene superata la soglia critica $\tau$, è fondamentale capire se si tratta di un'anomalia isolata (es. un singolo utente che fa operazioni anomale) o di una minaccia sistemica (es. un'infezione che si propaga). Si definisce l'insieme degli host critici $C = \{h \in H \mid S(h) > \tau\}$. 
+   La dimensione di questo insieme ($|C|$) definisce lo stato della rete:
+   * **$|C| = 0$ :** Rete sicura.
+   * **$|C| \approx 1$ :** Anomalia localizzata.
+   * **$|C| \gg 1$ :** Diffusione sistemica o movimento laterale in corso.
+
+**Risultati Attesi:**
+Il risultato atteso è un sistema di monitoraggio che, partendo dalle metriche di basso livello, genera un **Ranking di Priorità** degli host. Questo approccio quantitativo permette agli analisti non solo di individuare tempestivamente i nodi "sospetti" nella zona grigia, ottimizzando i tempi di neutralizzazione degli attacchi (*Incident Response*), ma anche di avere una metrica matematica oggettiva per certificare la sicurezza e la stabilità dell'intera infrastruttura di rete nel tempo.
