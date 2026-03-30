@@ -70,4 +70,35 @@ Il calcolo dell'equazione produce un valore compreso tra 0.0 e 1.0. Per risponde
 
 * **Stato Critico $\rightarrow [0.60 - 1.0]$ ("Va male")**
   Il superamento di questa soglia matematica certifica la convergenza di anomalie gravi. Per raggiungere o superare lo 0.60, l'host deve necessariamente aver contattato un IP malevolo, oppure aver generato *contemporaneamente* un picco volumetrico su protocolli mai usati in precedenza. L'analista riceve un allarme ad alta priorità per avviare le procedure di indagine e contenimento.
+  
+---
+
+## 4 Giustificazione dei Parametri Statistici e Temporali
+
+La solidità di un modello di *Anomaly Detection* non risiede solo nelle formule matematiche adottate, ma anche nel corretto dimensionamento dei parametri operativi. La scelta della soglia di anomalia, della finestra di osservazione e della profondità dello storico risponde a precise necessità statistiche e architetturali.
+
+### 4.1. La Soglia di Anomalia ($Z_{robusto} > 3$)
+L'impostazione della soglia di tolleranza $\theta = 3$ non è arbitraria, ma deriva direttamente dalla "Regola Empirica" della statistica descrittiva (nota anche come regola del 68-95-99.7). 
+
+
+
+Assumendo che il traffico di rete tenda a distribuirsi attorno a un valore centrale (la Mediana), la dispersione misurata tramite la MAD ci permette di standardizzare le distanze:
+* Uno Z-Score pari a **1** copre circa il **68%** delle normali fluttuazioni comportamentali.
+* Uno Z-Score pari a **2** copre circa il **95%** della varianza regolare.
+* Uno Z-Score pari a **3** ingloba il **99.7%** dei comportamenti ordinari dell'host.
+
+Scegliere di attivare le metriche di allarme ($M_i = 1$) solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia estremamente conservativa è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire il fenomeno dell'affaticamento da allarmi.
+
+### 4.2. La Finestra di Osservazione (Batch di 1 Ora)
+Le metriche statistiche richiedono l'accumulo di un *set* di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra temporale di osservazione di **1 ora** (rispetto a un'analisi al minuto o giornaliera) come compromesso architetturale ottimale:
+* **Contro il micro-batch (es. 5 minuti):** Finestre troppo brevi sono sensibili ai "micro-burst" (picchi istantanei legittimi, come il download di un file o l'apertura di una pagina web pesante), che invaliderebbero la statistica generando continuo "rumore".
+* **Contro il macro-batch (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inefficace per la neutralizzazione degli attacchi (*Incident Response*). Se l'allarme per un'esfiltrazione dati o un movimento laterale scattasse solo a mezzanotte, il danno architetturale sarebbe già stato ampiamente consumato.
+La finestra oraria garantisce quindi un volume di campioni statisticamente rilevante, mantenendo un tempo di reazione compatibile con le dinamiche di contenimento di un attacco.
+
+### 4.3 La Profondità dello Storico (Baseline di 7 Giorni)
+Per definire cosa sia "normale" per un dato host, il calcolo della Mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. 
+Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali. Il traffico di una rete IT segue pattern ciclici legati agli orari e ai giorni lavorativi. 
+
+Se il sistema utilizzasse uno storico di sole 24 ore, il traffico registrato un lunedì mattina verrebbe erroneamente classificato come un'anomalia estrema rispetto alla quiete della domenica precedente. La profondità di 7 giorni assicura che il comportamento attuale (es. martedì alle ore 10:00) venga confrontato con una baseline che ha già "imparato" e inglobato i pattern dell'intera settimana lavorativa e del weekend, rendendo il modello intrinsecamente consapevole dei cicli aziendali.
+
 ---
