@@ -59,18 +59,23 @@ $$S(h) = 0.25(M_{rep} + M_{ja3}) + 0.15(M_{scan} + M_{new}) + 0.10(M_{vol}) + 0.
 
 ---
 
-## 3. Verdetto: Classificazione dello Stato dell'Host
+## 3. Verdetto Operativo: Dall'Host all'Intera Rete
 
-Il calcolo dell'equazione produce un valore compreso tra 0.0 e 1.0. Per rispondere operativamente alla necessità di definire se il comportamento di un host "va bene o va male", il sistema mappa il risultato su tre fasce di rischio predefinite:
+Il calcolo dell'equazione produce un valore compreso tra 0.0 e 1.0. Per rispondere operativamente alla necessità di definire se il comportamento di un nodo "va bene o va male", il sistema mappa il risultato $S(h)$ su tre fasce di rischio predefinite. 
 
-* **Stato Regolare $\rightarrow [0.0 - 0.29]$ ("Va bene")**
-  L'host svolge le sue normali attività. Anche se dovesse verificarsi un isolato picco di traffico ($0.20$), il punteggio rimane sotto la soglia di allarme. Nessun intervento richiesto.
+Allo stesso tempo, per valutare la postura di sicurezza dell'intera infrastruttura, la *dashboard* degli analisti applica una logica basata sul caso peggiore (*Worst-Case Scenario*). Lo stato globale della rete è determinato dal punteggio massimo registrato tra tutti gli host attivi (max $S(h)$), mappandosi direttamente sulle stesse tre fasce:
 
-* **Zona Grigia $\rightarrow [0.30 - 0.59]$ ("Da monitorare")**
-  L'host mostra variazioni anomale di comportamento. Ad esempio, potrebbe aver iniziato a usare un protocollo inedito ($0.30$), magari associato a un traffico meccanico e automatizzato ($+0.10 = 0.40$). Non vi è certezza di compromissione, ma l'host scala posizioni nel sistema di monitoraggio degli analisti.
+* **Stato Regolare / Rete Sicura (Verde) $\rightarrow$ [0.0 - 0.29]**
+  * **Singolo Host:** Svolge le sue normali attività. Anche in presenza di un isolato picco di traffico (peso 0.10), il punteggio rimane sotto la soglia di allarme. 
+  * **Intera Rete:** Se nessun host supera lo 0.29, l'infrastruttura è considerata integra e non è richiesto alcun intervento.
 
-* **Stato Critico $\rightarrow [0.60 - 1.0]$ ("Va male")**
-  Il superamento di questa soglia matematica certifica la convergenza di anomalie gravi. Per raggiungere o superare lo 0.60, l'host deve necessariamente aver contattato un IP malevolo, oppure aver generato *contemporaneamente* un picco volumetrico su protocolli mai usati in precedenza. L'analista riceve un allarme ad alta priorità per avviare le procedure di indagine e contenimento.
+* **Zona Grigia / Rete in Osservazione (Giallo) $\rightarrow$ [0.30 - 0.59]**
+  * **Singolo Host:** Mostra variazioni anomale ("Da monitorare"). Ad esempio, potrebbe aver iniziato a usare un protocollo inedito (0.15) associato a un traffico automatizzato (0.05) e a un picco volumetrico (0.10). L'host scala le priorità nel sistema di monitoraggio.
+  * **Intera Rete:** La rete è tecnicamente intatta, ma la presenza di host in questa fascia richiede attenzione per prevenire anomalie o minacce *Low and Slow*.
+
+* **Stato Critico / Rete Compromessa (Rosso) $\rightarrow$ [0.60 - 1.0]**
+  * **Singolo Host:** Il superamento di questa soglia certifica la convergenza di anomalie gravi ("Va male"). L'host deve necessariamente aver contattato una destinazione malevola o esibito comportamenti crittografici/anomali combinati.
+  * **Intera Rete:** Poiché in *Cybersecurity* una rete è forte quanto il suo anello più debole, un solo host in stato critico (max $S(h) \ge 0.60$) dichiara l'intero perimetro compromesso, innescando l'immediata *Incident Response*.
   
 ---
 
@@ -80,8 +85,6 @@ La solidità di un modello di *Anomaly Detection* non risiede solo nelle formule
 
 ### 4.1. La Soglia di Anomalia ($Z_{robusto} > 3$)
 L'impostazione della soglia di tolleranza $\theta = 3$ non è arbitraria, ma deriva direttamente dalla "Regola Empirica" della statistica descrittiva (nota anche come regola del 68-95-99.7). 
-
-
 
 Assumendo che il traffico di rete tenda a distribuirsi attorno a un valore centrale (la Mediana), la dispersione misurata tramite la MAD ci permette di standardizzare le distanze:
 * Uno Z-Score pari a **1** copre circa il **68%** delle normali fluttuazioni comportamentali.
