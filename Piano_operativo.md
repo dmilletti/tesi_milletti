@@ -2,38 +2,39 @@
 
 Il presente documento traduce il modello logico-matematico in un piano di implementazione pratico. Per evitare un carico computazionale insostenibile e per permettere un'analisi statistica affidabile, il sistema adotta un approccio ibrido: elaborazione a **finestre temporali (batch orari)** per i comportamenti statistici ed elaborazione **guidata dagli eventi (event-driven)** per i controlli deterministici.
 
-## 1. Definizione e Frequenza di Osservazione delle Metriche
+## 1. Definizione Logica e Teorica delle Metriche di Sicurezza
 
-Per valutare lo stato di un host, il sistema osserva 7 metriche specifiche, estraendo i dati dai log di rete. Le metriche sono divise in due macro-categorie.
+Il modello si compone di sette metriche indipendenti, selezionate per coprire l'intero spettro delle anomalie di rete. Ciascuna metrica astrae uno specifico comportamento dell'host e lo traduce in un valore normalizzato $M_i \in \{0, 1\}$. Le metriche sono raggruppate in base all'approccio logico utilizzato per la loro valutazione.
 
-### 1.A Metriche Deterministiche (In Tempo Reale)
-Queste metriche operano **event-driven**: il controllo avviene non appena l'host instaura una connessione.
+### 1.A Metriche Deterministiche (In tempo reale)
+Queste metriche operano secondo una logica booleana e non necessitano di un periodo di apprendimento. Valutano la natura intrinseca di una singola connessione confrontandola con insiemi di dati noti a priori.
 
-* **1. Reputazione IP/DNS ($M_{rep}$):**
-  * **Parametro:** Indirizzi IP e domini richiesti.
-  * **Valutazione:** $1$ se la destinazione è presente in una *blacklist* di Threat Intelligence, altrimenti $0$.
-* **2. Fingerprinting del Traffico Cifrato ($M_{ja3}$):**
-  * **Parametro:** Hash JA3 (impronta digitale del client TLS) estratto dall'handshake crittografico.
-  * **Valutazione:** $1$ se l'hash JA3 corrisponde a quello di un client malevolo noto (es. un malware o un tool di esfiltrazione), altrimenti $0$. Questo permette di identificare minacce anche se il traffico è crittografato.
+* **1. Reputazione Logica delle Destinazioni ($M_{rep}$)**
+  * **Razionale Teorico:** Questa metrica valuta il livello di affidabilità degli *endpoint* esterni con cui l'host tenta di comunicare. L'astrazione logica si basa sul principio che una connessione verso un nodo di rete la cui maliziosità è già certificata (es. server di Comando e Controllo noti) compromette istantaneamente lo stato di sicurezza dell'host interno.
+  * **Formalizzazione:** Sia $\mathcal{B}$ l'insieme degli indirizzi IP e dei domini globalmente riconosciuti come malevoli (Threat Intelligence). Se la destinazione $d$ della connessione appartiene a tale insieme ($d \in \mathcal{B}$), l'evento viene marcato come compromissione certa, restituendo $M_{rep} = 1$.
 
-### 1.B Metriche Statistiche e Comportamentali (Finestra di 1 Ora)
-Queste metriche valutano la "zona grigia" tramite lo Z-Score Robusto o la Novelty Detection. Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni** (da valutare).
+* **2. Fingerprinting Crittografico del Client ($M_{ja3}$)**
+  * **Razionale Teorico:** La crittografia (TLS/SSL) rende illeggibile il contenuto dei pacchetti (Payload), rendendo inefficaci le analisi tradizionali. Questa metrica supera il limite della "cecità al contenuto" analizzando la firma strutturale (l'impronta digitale) della fase di negoziazione della connessione (*handshake*). Tool malevoli e malware utilizzano librerie crittografiche specifiche che generano firme uniche e distinguibili dai normali browser web.
+  * **Formalizzazione:** Il sistema estrae l'impronta crittografica del client. Se tale impronta coincide con lo spazio delle firme associate a software d'attacco, la metrica certifica l'anomalia strutturale restituendo $M_{ja3} = 1$.
 
-* **3. Scansione Interna / Fan-out ($M_{scan}$):**
-  * **Parametro:** Il numero di IP interni (host della LAN) unici contattati.
-  * **Valutazione:** $1$ se si registra un'impennata anomala di contatti verso macchine interne ($Z_{robusto} > 3$), tipica dei movimenti laterali o del *port-scanning*, altrimenti $0$.
-* **4. Novità di Servizio/Destinazione ($M_{new}$):**
-  * **Parametro:** L'insieme delle porte logiche (TCP/UDP) di destinazione.
-  * **Valutazione:** $1$ se l'host utilizza porte logiche mai osservate nello storico (l'insieme differenza non è vuoto), altrimenti $0$.
-* **5. Eccesso Volumetrico ($M_{vol}$):**
-  * **Parametro:** La somma totale dei byte inviati dall'host verso l'esterno.
-  * **Valutazione:** $1$ se lo scostamento del volume in uscita è eccezionale ($Z_{robusto} > 3$), altrimenti $0$.
-* **6. DNS Tunneling / Esfiltrazione Occulta ($M_{dns}$):**
-  * **Parametro:** La lunghezza media e l'entropia dei sottodomini richiesti nelle query DNS.
-  * **Valutazione:** $1$ se la lunghezza o il volume delle richieste DNS supera drasticamente la norma ($Z_{robusto} > 3$), indicando un possibile incapsulamento di dati nel protocollo DNS, altrimenti $0$.
-* **7. Anomalia di Periodicità / Jitter ($M_{time}$):**
-  * **Parametro:** La varianza temporale tra connessioni ripetute.
-  * **Valutazione:** Il traffico umano è irregolare. Se una macchina inizia a generare traffico automatizzato (*beaconing*), la varianza attuale $x$ crolla tendendo a zero. Questa caduta genera una distanza enorme dalla mediana storica, producendo uno scostamento eccezzionale ($Z_{robusto}>3$). Ritorna $1$ in caso di superamento della soglia, altrimenti $0$.
+### 1.B Metriche Statistiche e Comportamentali (Finestra di 1 ora)
+Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispetto allo stato di quiete dell'host. Sfruttano la teoria degli insiemi (Novelty Detection) e lo scostamento statistico standardizzato ($Z_{robusto}$). Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni**.
+
+* **3. Scansione interna o Fan-out ($M_{scan}$)**
+  * **Razionale Teorico:** In una rete ben strutturata, un host standard comunica regolarmente con un numero ristretto e stabile di nodi interni (es. gateway, server DNS, stampanti). Un incremento improvviso del numero di macchine interne contattate è il sintomo primario di una fase di ricognizione (*Network Discovery*) o del tentativo di propagazione di un'infezione (Movimento Laterale).
+  * **Formalizzazione:** La variabile analizzata è la cardinalità degli IP interni contattati. Se il valore attuale si discosta in modo eccezionale dalla Mediana storica calcolata per quell'host ($Z_{robusto} > 3$), si attiva $M_{scan} = 1$.
+* **4. Esplorazione Inedita di Rete ($M_{new}$)**
+  * **Razionale Teorico:** Un host tradizionale tende a utilizzare un set circoscritto di protocolli e porte logiche legate alla sua funzione aziendale. L'apertura di connessioni verso porte logiche mai utilizzate in precedenza rappresenta un forte indicatore di cambiamento comportamentale, tipico dell'esfiltrazione dati tramite canali non convenzionali o dello sfruttamento di nuove vulnerabilità.
+  * **Formalizzazione:** Applicando la *Novelty Detection*, sia $P_{storico}$ l'insieme delle porte logiche storicamente note e $P_{oggi}$ l'insieme delle porte attuali. Se l'insieme differenza non è vuoto ($P_{oggi} \setminus P_{storico} \neq \emptyset$), il comportamento è inedito e si fissa $M_{new} = 1$.
+* **5. Asimmetria Volumetrica in Uscita ($M_{vol}$)**
+  * **Razionale Teorico:** I flussi di rete client-server tradizionali sono tipicamente asimmetrici a favore del traffico in ingresso (download). Un ribaltamento improvviso di questa dinamica, caratterizzato da un trasferimento massivo di dati dall'host verso l'esterno, astrae il concetto di esfiltrazione di dati sensibili o di invio di materiale non autorizzato.
+  * **Formalizzazione:** La variabile monitorata è la somma dei byte in uscita. Un picco estremo rispetto alla varianza abituale (MAD) genera un valore di $Z_{robusto} > 3$, attivando $M_{vol} = 1$.
+* **6. Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)**
+  * **Razionale Teorico:** Il DNS è un protocollo nato esclusivamente per tradurre nomi in indirizzi IP, caratterizzato da query brevi e leggibili. Tecniche avanzate di elusione (come il *DNS Tunneling*) abusano di questo protocollo incapsulando dati rubati all'interno di stringhe lunghissime e apparentemente casuali (es. `x8f9q...z1.dominio.com`). 
+  * **Formalizzazione:** La metrica analizza le proprietà testuali delle richieste, come la lunghezza media o l'entropia della stringa. Se l'host inizia a generare query con un grado di entropia o lunghezza statisticamente incompatibile con la sua norma ($Z_{robusto} > 3$), si registra un abuso del canale e $M_{dns} = 1$.
+* **7. Rigidità Temporale e Automazione ($M_{time}$)**
+  * **Razionale Teorico:** L'interazione umana con le interfacce di rete è guidata da logiche stocastiche: il tempo tra un click e l'altro (o tra una richiesta e l'altra) presenta una varianza naturale molto elevata. Al contrario, i processi infetti (come le *botnet* che comunicano con il proprio creatore) sono implementati tramite cicli algoritmici rigidi, generando comunicazioni periodiche estremamente precise.
+  * **Formalizzazione:** La metrica analizza la varianza del tempo di inter-arrivo (Inter-Arrival Time) dei pacchetti. L'anomalia si verifica non per un picco verso l'alto, ma per un crollo della varianza verso lo zero. Questa assenza di casualità genera un'enorme distanza matematica dalla mediana storica (umana), innescando lo $Z_{robusto} > 3$ e portando $M_{time} = 1$.
 
 ---
 
