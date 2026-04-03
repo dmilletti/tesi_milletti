@@ -25,32 +25,63 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispetto allo stato di quiete dell'host. Sfruttano l'ispezione profonda, la teoria degli insiemi (Novelty Detection) e lo scostamento statistico standardizzato ($Z_{robusto}$). Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni**.
 
 * **4. Rilevamento Funzionalità Server ($M_{srv}$)**
-  * **Razionale Teorico:** In una rete aziendale, una normale *workstation* opera tipicamente come "Client", originando traffico verso l'esterno. L'apertura improvvisa di una porta in ascolto che accetta connessioni in ingresso indica un'inversione di ruolo, sintomo critico dell'installazione di una *backdoor* o di un accesso remoto non autorizzato.
-  * **Formalizzazione:** Se l'host, storicamente noto come client, accetta con successo connessioni logiche in ingresso agendo da ricevitore, si attiva $M_{srv} = 1$.
+  * **Razionale Teorico:** In una rete aziendale standard, una normale *workstation* opera tipicamente come "Client", originando traffico verso l'esterno. L'apertura improvvisa di una porta locale in ascolto (socket) che accetta con successo connessioni in ingresso indica un'inversione di ruolo, sintomo critico dell'installazione di una *backdoor* o di un movimento laterale. Il sistema adotta un approccio **Zero Trust**: ogni inversione di ruolo genera un'anomalia. Si esclude deliberatamente l'uso di "Whitelist" per gli IP di amministrazione IT, poiché la compromissione di un nodo autorizzato permetterebbe all'attaccante di muoversi lateralmente eludendo la metrica.
+  * **Implementazione Tecnica:** Il monitoraggio si basa sull'analisi deterministica dei flussi di rete (tramite sonde come NetFlow o Zeek) a livello di trasporto (L4). Per il protocollo TCP, un host interno agisce da server se invia pacchetti con flag `SYN-ACK` in risposta a un `SYN`. Nei log di flusso, ciò si traduce nell'osservare l'host monitorato con il ruolo di *Responder* in una sessione contrassegnata come stabilita.
+  * **Formalizzazione:** Sia $F$ l'insieme dei flussi di rete bidirezionali stabiliti con successo. Un singolo flusso $f \in F$ è definito dalla tupla $(o, r)$, dove $o$ è l'host *Originator* (chi inizia la connessione) e $r$ è l'host *Responder* (chi accetta la connessione). Se per l'host monitorato $h$ esiste almeno un flusso $f$ in cui esso compare come ricevitore ($h = r$), si certifica l'inversione di ruolo e si impone $M_{srv} = 1$.
 
 * **5. Protocollo su Porta Non Standard ($M_{proto}$)**
-  * **Razionale Teorico:** Per eludere i firewall perimetrali, le minacce instradano traffico anomalo (es. protocolli di amministrazione remota come SSH o tunnel VPN) su porte logiche tipicamente consentite e riservate ad altri scopi (es. porta 80 o 443 per il web).
-  * **Formalizzazione:** Tramite ispezione profonda dei pacchetti, se l'applicativo rilevato non corrisponde al protocollo standard atteso per quella specifica porta logica (tentativo di evasione), si fissa $M_{proto} = 1$.
+  * **Razionale Teorico:** I firewall perimetrali tradizionali bloccano il traffico basandosi sulle porte logiche (Livello 4). Per eludere queste restrizioni, gli attaccanti instradano traffico anomalo (es. protocolli di amministrazione remota come SSH, o tunnel VPN) su porte tipicamente sempre aperte e riservate al traffico web (come la porta 80 o 443).
+  * **Implementazione Tecnica:** La misurazione richiede l'impiego di sonde di *Deep Packet Inspection* (DPI), come Zeek o librerie come nDPI. Questi strumenti analizzano la firma strutturale del *payload* del pacchetto per identificare il reale protocollo applicativo (Livello 7), indipendentemente dalla porta utilizzata. Il sistema estrae il metadato L7 e lo confronta con lo standard IANA atteso per la porta di destinazione (L4) del flusso.
+  * **Formalizzazione:** Sia $p$ la porta logica di destinazione di un flusso di rete. Sia $\mathcal{M}(p)$ la funzione che mappa la porta $p$ al suo protocollo applicativo standard atteso (ad esempio, $\mathcal{M}(443) = \text{TLS}$). Sia $L7_{DPI}$ il reale protocollo applicativo identificato dalla sonda tramite ispezione profonda. Se l'analizzatore identifica con certezza un protocollo che diverge dallo standard atteso ( $L7_{DPI} \neq \mathcal{M}(p)$ ), viene certificato un tentativo di evasione o un mascheramento del traffico, fissando $M_{proto} = 1$.
 
-* **6. Scansione interna o Fan-out ($M_{scan}$)**
-  * **Razionale Teorico:** Un host standard comunica regolarmente con un numero stabile di nodi interni. Un incremento improvviso del numero di macchine interne contattate è il sintomo primario di una fase di ricognizione (*Network Discovery*) o del tentativo di propagazione di un'infezione (Movimento Laterale).
-  * **Formalizzazione:** La variabile analizzata è la cardinalità degli IP interni contattati. Se il valore attuale si discosta in modo eccezionale dalla Mediana storica ($Z_{robusto} > 3$), si attiva $M_{scan} = 1$.
+* **6. Scansione Interna o Fan-out ($M_{scan}$)**
+  * **Razionale Teorico:** Un host standard all'interno di un'architettura di rete comunica tipicamente con un numero stabile e limitato di nodi interni (es. domain controller, file server, stampanti). Un incremento improvviso e massiccio del "Fan-out" (il numero di host distinti contattati) è il sintomo primario di una fase di ricognizione automatizzata (*Network Discovery*) o del tentativo di propagazione di un'infezione (Movimento Laterale).
+  * **Implementazione Tecnica:** Il calcolo viene effettuato aggregando i log di flusso direzionali (es. NetFlow) alla chiusura della finestra oraria (batch). Il sistema filtra esclusivamente i flussi in cui l'host monitorato agisce come *Originator* e in cui l'indirizzo IP di destinazione appartiene allo spazio di indirizzamento interno dell'organizzazione (es. subnet RFC 1918). Viene quindi estratto il numero di indirizzi IP di destinazione unici.
+  * **Formalizzazione:** Sia $D_{int}$ l'insieme degli IP interni univoci contattati dall'host $h$ nella finestra oraria corrente $t$. La variabile osservata è la cardinalità dell'insieme: $x_t = |D_{int}|$. Siano $\tilde{x}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* calcolate sulla distribuzione storica della stessa variabile $x$ per l'host $h$ negli ultimi 7 giorni. Il sistema calcola lo scostamento statistico standardizzato:
+
+    $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
+
+    Se il valore risultante indica un picco eccezionale ($Z_{robusto} > 3$), l'anomalia esplorativa è certificata e si impone $M_{scan} = 1$.
 
 * **7. Esplorazione di Protocolli Inediti ($M_{new}$)**
-  * **Razionale Teorico:** Limitarsi all'analisi delle porte logiche (Livello 4) espone al rumore generato dalle porte effimere. Questa metrica eleva il controllo al Livello Applicativo (Livello 7) tramite *Deep Packet Inspection* (DPI). Un host aziendale utilizza tipicamente un set ristretto di protocolli (es. HTTP/S, DNS, IMAP). L'esordio improvviso di protocolli mai utilizzati prima (es. traffico *Peer-to-Peer* come BitTorrent, routing anonimo come Tor o protocolli di desktop remoto come RDP) è un indicatore primario di compromissione o di *Shadow IT*.
-  * **Formalizzazione:** Applicando la *Novelty Detection* ai metadati L7, sia $P_{storico}$ l'insieme dei protocolli applicativi storicamente noti per l'host e $P_{oggi}$ l'insieme dei protocolli attualmente rilevati. Se l'insieme differenza non è vuoto ($P_{oggi} \setminus P_{storico} \neq \emptyset$), il comportamento è inedito e si fissa $M_{new} = 1$.
+  * **Razionale Teorico:** Un host aziendale standard possiede una "firma comportamentale" applicativa ben definita e ripetitiva (es. navigazione web via HTTP/TLS, risoluzione nomi via DNS, protocolli di posta). L'esordio improvviso di protocolli di Livello 7 mai utilizzati in precedenza dalla macchina (come traffico *Peer-to-Peer* per l'esfiltrazione, *routing* anonimo tramite Tor, o protocolli di amministrazione remota come RDP/SSH) è un indicatore primario dell'esecuzione di un *payload* malevolo o della compromissione del nodo.
+  * **Implementazione Tecnica:** L'analisi si affida ai log generati da un motore di *Deep Packet Inspection* (DPI, es. Zeek o nDPI), che estrae con precisione l'identificativo del protocollo applicativo incapsulato nel *payload*, ignorando la porta L4. Al termine di ogni batch orario, il sistema aggrega tutti i protocolli L7 identificati per l'host e li confronta con il "profilo applicativo" appreso dinamicamente (la *baseline* ricavata dai log degli ultimi 7 giorni).
+  * **Formalizzazione:** Applicando i principi della *Novelty Detection* tramite la teoria degli insiemi, sia $P_{storico}$ l'insieme di tutti i protocolli applicativi (L7) univoci generati dall'host $h$ nella finestra di apprendimento mobile di 7 giorni. Sia $P_{batch}$ l'insieme dei protocolli applicativi estratti dal traffico dell'host $h$ nell'ultima ora di monitoraggio. Se l'insieme differenza tra i due non risulta vuoto:
+
+    $$P_{batch} \setminus P_{storico} \neq \emptyset$$
+    
+    significa che è comparso almeno un protocollo totalmente inedito per la storicità del nodo. In tal caso, si fissa $M_{new} = 1$.
 
 * **8. Asimmetria Volumetrica in Uscita ($M_{vol}$)**
-  * **Razionale Teorico:** Un ribaltamento improvviso della dinamica di rete, caratterizzato da un trasferimento massivo di dati dall'host verso l'esterno, astrae il concetto di esfiltrazione di dati sensibili.
-  * **Formalizzazione:** La variabile monitorata è la somma dei byte in uscita. Un picco estremo rispetto alla varianza abituale genera un valore di $Z_{robusto} > 3$, attivando $M_{vol} = 1$.
-
+  * **Razionale Teorico:** Nella normale operatività aziendale, una postazione di lavoro ha un profilo di traffico asimmetrico sbilanciato verso il *download* (scaricamento di file, navigazione web, ricezione posta). Un ribaltamento improvviso di questa dinamica, caratterizzato da un trasferimento massivo di dati dall'host verso l'esterno (*upload*), astrae il concetto critico di esfiltrazione di dati sensibili o di invio di archivi verso un server *Drop point* controllato da un attaccante.
+  * **Implementazione Tecnica:** Il calcolo aggrega la telemetria di base dei flussi di rete direzionali (NetFlow o log del Firewall) alla chiusura del batch orario. Il sistema filtra i flussi uscenti (dove l'host monitorato è *Originator* e la destinazione è un IP esterno) e somma il valore del campo "Byte trasmessi" (o `bytes_out`).
+  * **Formalizzazione:** Sia $V_{out}$ il volume totale in byte trasmessi verso l'esterno dall'host $h$ nella finestra oraria corrente $t$. Siano $\tilde{V}$ e $MAD$ la Mediana e la *Median Absolute Deviation* dei volumi in uscita storici (finestra di 7 giorni). Il sistema calcola lo Z-Score robusto per quantificare l'anomalia volumetrica:
+    
+    $$Z_{robusto} = \frac{|V_{out} - \tilde{V}|}{MAD}$$
+    
+    Se il picco di trasferimento genera uno scostamento eccezionale rispetto alla varianza abituale ($Z_{robusto} > 3$), l'esfiltrazione o l'asimmetria anomala viene certificata, portando $M_{vol} = 1$.
+    
 * **9. Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)**
-  * **Razionale Teorico:** Tecniche avanzate di elusione (come il *DNS Tunneling* o gli algoritmi DGA) abusano del protocollo DNS incapsulando dati rubati o richieste malevole all'interno di stringhe lunghissime e apparentemente casuali. 
-  * **Formalizzazione:** Se l'host inizia a generare query con un grado di entropia o lunghezza statisticamente incompatibile con la sua norma ($Z_{robusto} > 3$), si registra un abuso del canale e $M_{dns} = 1$.
+  * **Razionale Teorico:** Alcuni attacchi avanzati (come il *DNS Tunneling* o i malware DGA) sfruttano il normale traffico DNS per nascondere informazioni. Invece di chiedere alla rete di tradurre nomi a dominio legittimi, gli attaccanti incapsulano dati esfiltrati o comandi all'interno di stringhe lunghissime e generate in modo pseudo-casuale (es. `x9k2js8...malicious.com`).
+  * **Implementazione Tecnica:** L'analizzatore estrae i nomi a dominio completi (FQDN) direttamente dalle richieste registrate nei log del server DNS aziendale o tramite sonde di traffico passivo. Su ogni stringa estratta viene calcolata l'Entropia di Shannon, un indicatore matematico che ne misura il "livello di disordine" o casualità dei caratteri. Al termine della finestra oraria, si calcola l'entropia aggregata delle richieste e la si confronta con il profilo abituale dell'host.
+  * **Formalizzazione:** Sia $q$ la stringa del dominio interrogato e $p_i$ la frequenza con cui compare l'i-esimo carattere nella parola. L'Entropia di Shannon per la singola richiesta è calcolata come:
+
+    $$E(q) = - \sum_{i} p_i \log_2(p_i)$$
+
+    Sia $E_{batch}$ il valore di entropia tipico registrato dall'host $h$ nell'ora corrente. Confrontandolo con la Mediana $\tilde{E}$ e la $MAD$ storiche (calcolate su 7 giorni), si ottiene lo scostamento statistico:
+
+    $$Z_{robusto} = \frac{|E_{batch} - \tilde{E}|}{MAD}$$
+
+    Se il livello di disordine delle stringhe genera uno scostamento incompatibile con le normali abitudini dell'host ($Z_{robusto} > 3$), si registra un abuso del protocollo e si fissa $M_{dns} = 1$.
 
 * **10. Rigidità Temporale e Automazione ($M_{time}$)**
-  * **Razionale Teorico:** I processi infetti (come le *botnet*) sono implementati tramite cicli algoritmici rigidi, generando comunicazioni periodiche estremamente precise, contrariamente all'elevata varianza che caratterizza la navigazione umana.
-  * **Formalizzazione:** La metrica analizza la varianza del tempo di inter-arrivo dei pacchetti. Un crollo della varianza verso lo zero innesca lo $Z_{robusto} > 3$, portando $M_{time} = 1$.
+  * **Razionale Teorico:** I processi infetti (come le *botnet*) comunicano con i server esterni di Comando e Controllo (C2) utilizzando cicli algoritmici preimpostati. Questo genera comunicazioni periodiche estremamente precise (effetto *heartbeat* o battito cardiaco), in netto contrasto con l'elevata variabilità temporale che caratterizza la normale navigazione umana.
+  * **Implementazione Tecnica:** Il sistema analizza i *timestamp* di inizio dei flussi di rete verso destinazioni esterne (es. log NetFlow). Viene calcolato il tempo di inter-arrivo, ovvero l'intervallo temporale che trascorre tra la generazione di un flusso e il successivo. Alla fine del batch orario, si valuta la varianza di questi intervalli. Una varianza che crolla verso lo zero indica una forte automazione meccanica e innaturale.
+  * **Formalizzazione:** Sia $\Delta t_i$ il tempo trascorso tra l'inizio di un flusso di rete e il successivo. Sia $V_{batch}$ la varianza di questi intervalli temporali registrata nell'ora corrente per l'host $h$. Confrontandola con la Mediana storica $\tilde{V}$ e la $MAD$, si calcola lo scostamento:
+
+    $$Z_{robusto} = \frac{|V_{batch} - \tilde{V}|}{MAD}$$
+
+    Se lo scostamento statistico è eccezionale ($Z_{robusto} > 3$) e, contestualmente, la varianza attuale è nettamente inferiore a quella storica (cioè $V_{batch} \ll \tilde{V}$, indicando un crollo della variabilità temporale), si certifica la presenza di un automatismo informatico e si impone $M_{time} = 1$.
 
 ---
 
