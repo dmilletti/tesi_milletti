@@ -100,27 +100,38 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
 ---
 
-## 2. Sistema di Scoring Additivo (0-100)
+## 2. Sistema di Scoring Additivo e Normalizzazione (0-100)
 
-Allo scadere di ogni ora di monitoraggio, il sistema aggrega i valori delle 10 metriche. Ogni anomalia rilevata ($M_i = 1$) aggiunge un punteggio di penalità predefinito in base alla sua gravità intrinseca:
+Il modello operativo non valuta i singoli pacchetti in modo isolato, ma aggrega le anomalie per definire lo stato di salute generale del nodo. Per garantire un'analisi consistente e limitare l'esplosione combinatoria dei dati, il sistema di *scoring* si basa su regole precise di temporizzazione e normalizzazione.
 
-* **Gravità Critica (Compromissione certa):**
-  * Reputazione Destinazione ($M_{rep}$): **+50 punti**
-  * Fingerprinting JA3 ($M_{ja3}$): **+50 punti**
-* **Sospetto Alto (Cambiamenti strutturali):**
-  * Anomalie Certificati TLS ($M_{cert}$): **+40 punti**
-  * Funzionalità Server Rilevata ($M_{srv}$): **+40 punti**
-* **Evasione e Ricognizione:**
-  * Protocollo su Porta Non Standard ($M_{proto}$): **+30 punti**
-  * Scansione interna / Fan-out ($M_{scan}$): **+30 punti**
-* **Zona Grigia (Anomalie quantitative e novità):**
-  * Esplorazione Inedita ($M_{new}$): **+20 punti**
-  * Asimmetria Volumetrica ($M_{vol}$): **+20 punti**
-* **Segnali Deboli (Indicatori di supporto):**
-  * Anomalie DNS ($M_{dns}$): **+10 punti**
-  * Automazione Temporale ($M_{time}$): **+10 punti**
+### 2.1 Frequenza di Calcolo e Normalizzazione Matematica
+Per rispondere all'esigenza di correlare gli eventi senza sovraccaricare il sistema, lo *Score Globale* dell'host viene calcolato (o ricalcolato) in due scenari:
+1. **Event-driven (In tempo reale):** Immediatamente, non appena si attiva una metrica deterministica (es. $M_{rep}$ o $M_{ja3}$).
+2. **Time-driven (A fine batch):** Allo scadere di ogni finestra oraria (1 ora), aggregando i risultati delle metriche statistiche.
 
-L'equazione finale per il calcolo dello *Score Globale* dell'host risulta limitata a un massimo di 100:
+È fondamentale chiarire la meccanica di **normalizzazione**: il punteggio **non è cumulativo per singolo flusso di rete**. Se un host genera 1.000 connessioni anomale verso una porta non standard all'interno della stessa ora, la metrica $M_{proto}$ valuta l'host nel suo complesso e si attiverà una sola volta ($M_{proto} = 1$). L'impiego di variabili booleane ($M_i \in \{0, 1\}$) funge da normalizzatore intrinseco: la penalità viene assegnata per la *presenza* del comportamento anomalo nella finestra temporale, non per il suo *volume* (il quale è già gestito dallo Z-Score all'interno delle singole metriche). 
+
+### 2.2 Ponderazione delle Soglie di Rischio
+I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'analisi del rischio basata su due fattori: l'**impatto** dell'anomalia (es. esfiltrazione vs ricognizione) e la **probabilità di falsi positivi**. Ogni anomalia rilevata ($M_i = 1$) aggiunge un punteggio predefinito:
+
+* **Gravità Critica (+50 punti):** Assegnati a comportamenti con un livello di confidenza quasi assoluto e falsi positivi prossimi allo zero. Una singola violazione (es. contattare una destinazione malevola nota) compromette per metà l'affidabilità del nodo. Due violazioni critiche saturate portano subito lo score a 100.
+  * Reputazione Destinazione ($M_{rep}$)
+  * Fingerprinting crittografico JA3 ($M_{ja3}$)
+* **Sospetto Alto (+40 punti):** Anomalie strutturali gravi, ma che richiedono almeno un'altra anomalia secondaria per certificare la compromissione totale (superamento soglia 60).
+  * Anomalie Certificati TLS ($M_{cert}$)
+  * Funzionalità Server Rilevata ($M_{srv}$)
+* **Evasione e Ricognizione (+30 punti):** Comportamenti tipici delle fasi intermedie di un attacco (es. movimenti laterali), che potrebbero però coincidere con rari interventi di amministrazione IT.
+  * Protocollo su Porta Non Standard ($M_{proto}$)
+  * Scansione interna / Fan-out ($M_{scan}$)
+* **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie puramente quantitative. Hanno un'alta probabilità di falsi positivi (es. un dipendente che usa WeTransfer genera un'asimmetria volumetrica), pertanto il peso ridotto garantisce che l'host rimanga in "zona verde/sicura" se l'evento è isolato.
+  * Esplorazione Inedita ($M_{new}$)
+  * Asimmetria Volumetrica ($M_{vol}$)
+* **Segnali Deboli (+10 punti):** Anomalie che, prese singolarmente, non sono sufficienti per destare allarme, ma fungono da "moltiplicatori" per confermare altre minacce.
+  * Anomalie DNS ($M_{dns}$)
+  * Automazione Temporale ($M_{time}$)
+
+L'equazione finale per il calcolo dello *Score Globale* dell'host risulta matematicamente limitata a un valore massimo di 100 tramite la funzione minimo:
+
 $$S(h) = \min\left(100, \sum_{i=1}^{10} \text{Punti}_i \cdot M_i\right)$$
 
 ---
