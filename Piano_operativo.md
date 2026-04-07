@@ -109,7 +109,12 @@ Per rispondere all'esigenza di correlare gli eventi senza sovraccaricare il sist
 1. **Event-driven (In tempo reale):** Immediatamente, non appena si attiva una metrica deterministica (es. $M_{rep}$ o $M_{ja3}$).
 2. **Time-driven (A fine batch):** Allo scadere di ogni finestra oraria (1 ora), aggregando i risultati delle metriche statistiche.
 
-È fondamentale chiarire la meccanica di **normalizzazione**: il punteggio **non è cumulativo per singolo flusso di rete**. Se un host genera 1.000 connessioni anomale verso una porta non standard all'interno della stessa ora, la metrica $M_{proto}$ valuta l'host nel suo complesso e si attiverà una sola volta ($M_{proto} = 1$). L'impiego di variabili booleane ($M_i \in \{0, 1\}$) funge da normalizzatore intrinseco: la penalità viene assegnata per la *presenza* del comportamento anomalo nella finestra temporale, non per il suo *volume* (il quale è già gestito dallo Z-Score all'interno delle singole metriche). 
+
+Per prevenire un'esplosione incontrollata del punteggio, il sistema implementa una **normalizzazione intrinseca basata sulla finestra temporale anziché sui singoli eventi**. 
+
+È fondamentale chiarire che il punteggio **non è cumulativo per ogni singolo flusso di rete anomalo**. La trasformazione di ogni metrica in una variabile booleana ($M_i \in \{0, 1\}$) garantisce che la penalità venga assegnata esclusivamente per la *presenza* di quel comportamento nell'arco dell'ora monitorata, indipendentemente dalla sua frequenza di ripetizione. 
+
+Ad esempio, se un host genera 1.000 connessioni evasive verso una porta non standard all'interno dello stesso batch orario, la metrica non assegnerà 1.000 penalità consecutive, ma "scatterà" una sola volta per quell'ora ($M_{proto} = 1$). L'intensità e il volume dell'attacco non vengono ignorati dal modello, ma sono già valutati e assorbiti a monte dal calcolo dello $Z_{robusto}$, il quale funge da interruttore per attivare o meno la metrica. Questo meccanismo garantisce che lo score finale rimanga confinato e proporzionato all'interno della scala 0-100.
 
 ### 2.2 Ponderazione delle Soglie di Rischio
 I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'analisi del rischio basata su due fattori: l'**impatto** dell'anomalia (es. esfiltrazione vs ricognizione) e la **probabilità di falsi positivi**. Ogni anomalia rilevata ($M_i = 1$) aggiunge un punteggio predefinito:
