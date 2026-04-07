@@ -10,16 +10,31 @@ Il modello si compone di **dieci metriche indipendenti**, selezionate per coprir
 Queste metriche operano secondo una logica booleana e non necessitano di un periodo di apprendimento. Valutano la natura intrinseca di una singola connessione confrontandola con insiemi di dati noti a priori.
 
 * **1. Reputazione Logica delle Destinazioni ($M_{rep}$)**
-  * **Razionale Teorico:** Valuta il livello di affidabilità degli *endpoint* esterni con cui l'host tenta di comunicare. Una connessione verso un nodo di rete la cui maliziosità è già certificata (es. server di Comando e Controllo noti) compromette istantaneamente lo stato di sicurezza dell'host interno.
-  * **Formalizzazione:** Sia $\mathcal{B}$ l'insieme degli indirizzi IP e dei domini globalmente riconosciuti come malevoli (Threat Intelligence). Se la destinazione $d$ della connessione appartiene a tale insieme ($d \in \mathcal{B}$), l'evento viene marcato come compromissione certa, restituendo $M_{rep} = 1$.
+  * **Razionale Teorico:** Valuta il livello di affidabilità degli *endpoint* esterni con cui l'host tenta di comunicare. Una connessione verso un nodo di rete la cui maliziosità è già certificata (es. server di Comando e Controllo noti, nodi di uscita Tor, o domini di *phishing*) compromette istantaneamente lo stato di sicurezza dell'host interno, configurando una certezza di infezione o esfiltrazione.
+  * **Implementazione Tecnica:** L'analizzatore estrae in tempo reale gli indirizzi IP di destinazione dai log di flusso (es. NetFlow) e i nomi a dominio estratti dalle query DNS. Questi indicatori di compromissione estratti dal traffico vengono confrontati in modo deterministico con piattaforme di *Threat Intelligence* aziendali (es. MISP) o *blacklist* pubbliche costantemente aggiornate.
+  * **Formalizzazione:** Sia $\mathcal{B}$ l'insieme dinamico degli Indicatori di Compromissione, che include tutti gli indirizzi IP e i domini globalmente riconosciuti come malevoli in un dato istante temporale. Sia $d$ l'indirizzo IP di destinazione di un flusso di rete generato e $q$ l'eventuale dominio interrogato dall'host $h$. Se l'host tenta di contattare una destinazione presente nella lista nera:
+
+    $$d \in \mathcal{B} \lor q \in \mathcal{B}$$
+
+    l'evento viene immediatamente marcato come compromissione certa, restituendo $M_{rep} = 1$.
 
 * **2. Fingerprinting Crittografico del Client ($M_{ja3}$)**
-  * **Razionale Teorico:** La crittografia rende illeggibile il contenuto dei pacchetti, limitando le analisi tradizionali. Questa metrica supera tale limite analizzando la firma strutturale (l'impronta digitale) della fase di negoziazione della connessione (*handshake*). Tool malevoli e malware utilizzano librerie crittografiche specifiche che generano firme uniche.
-  * **Formalizzazione:** Il sistema estrae l'impronta crittografica del client. Se tale impronta coincide con lo spazio delle firme associate a software d'attacco, la metrica certifica l'anomalia strutturale restituendo $M_{ja3} = 1$.
+  * **Razionale Teorico:** La crittografia (TLS/SSL) rende illeggibile il contenuto dei pacchetti, impedendo le analisi tradizionali. Tuttavia, ogni software (browser, script Python, o malware) esegue la fase di handshake in modo unico, dichiarando quali algoritmi e versioni supporta. Questa "firma" permette di identificare il tipo di applicazione che ha originato il traffico, distinguendo un browser legittimo da un tool d'attacco o da un ransomware.
+  * **Implementazione Tecnica:** Il sistema utilizza sonde di ispezione profonda (DPI come Zeek o Suricata) per estrarre cinque parametri specifici dal pacchetto *TLS Client Hello*. Questi parametri vengono concatenati e trasformati in un'impronta digitale univoca di 32 caratteri (Hash MD5), denominata **JA3**. Tale impronta viene confrontata in tempo reale con un database di firme associate a strumenti malevoli (es. Cobalt Strike, Metasploit, o diverse famiglie di malware).
+  * **Formalizzazione:** Sia $\mathcal{J}$ l'insieme delle firme JA3 censite come malevole nelle banche dati di *Threat Intelligence*. Sia $j$ l'impronta JA3 estratta dalla connessione corrente dell'host $h$. Se l'impronta calcolata appartiene all'insieme delle firme note per software d'attacco:
+
+    $$j \in \mathcal{J}$$
+
+    la metrica certifica l'uso di software non autorizzato o malevolo, restituendo $M_{ja3} = 1$.
 
 * **3. Anomalie nei Certificati TLS ($M_{cert}$)**
-  * **Razionale Teorico:** I siti web e i servizi cloud legittimi utilizzano certificati emessi da Autorità di Certificazione (CA) riconosciute. Le infrastrutture di attacco improvvisate impiegano frequentemente certificati auto-firmati (*Self-Signed*) o con parametri di validità errati (es. durate secolari).
-  * **Formalizzazione:** L'analizzatore verifica la catena di fiducia del certificato presentato dal server. In presenza di certificati auto-firmati o palesemente non conformi agli standard di sicurezza, si fissa $M_{cert} = 1$.
+  * **Razionale Teorico:** I siti web e i servizi cloud legittimi utilizzano certificati crittografici emessi da Autorità di Certificazione (CA) pubblicamente riconosciute e attendibili. Le infrastrutture d'attacco o i server C2 (*Command and Control*) improvvisati impiegano frequentemente certificati auto-firmati (*Self-Signed*), scaduti, o generati con parametri di validità palesemente anomali per risparmiare tempo o eludere i controlli di base.
+  * **Implementazione Tecnica:** Il sistema sfrutta sonde di *Deep Packet Inspection* per analizzare il pacchetto *TLS Certificate* inviato dal server al client durante l'handshake. Estrae i metadati del certificato X.509 (in particolare i campi *Issuer*, *Subject*, *Not Before* e *Not After*). Successivamente, verifica se la CA emittente appartiene al *Trust Store* aziendale (l'elenco delle autorità di cui ci si fida) e valuta la coerenza temporale delle date di validità.
+  * **Formalizzazione:** Sia $c$ il certificato TLS presentato dal server di destinazione. Definiamo $\mathcal{T}$ come l'insieme delle Autorità di Certificazione (CA) globalmente attendibili. Definiamo inoltre la funzione booleana $SelfSigned(c)$ (vera se il certificato è auto-firmato, ovvero se l'emittente coincide con il soggetto) e la funzione $Invalid(c)$ (vera se il certificato risulta scaduto o con date di validità non conformi). Se si verifica almeno una di queste condizioni anomale:
+
+    $$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c)$$
+
+    il canale di comunicazione viene marcato come inaffidabile o potenzialmente compromesso, attivando $M_{cert} = 1$.
 
 ### 1.B Metriche Statistiche e Comportamentali (Finestra di 1 ora)
 Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispetto allo stato di quiete dell'host. Sfruttano l'ispezione profonda, la teoria degli insiemi (Novelty Detection) e lo scostamento statistico standardizzato ($Z_{robusto}$). Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni**.
