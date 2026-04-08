@@ -161,12 +161,41 @@ Allo stesso tempo, per valutare la postura di sicurezza dell'intera infrastruttu
   
 ---
 
-## 4. Giustificazione dei Parametri Statistici e Temporali
+## 4. Analisi Comparativa e Architettura del Sistema
 
-La solidità di un modello di *Anomaly Detection* non risiede solo nelle formule matematiche adottate, ma anche nel corretto dimensionamento dei parametri operativi. La scelta della soglia di anomalia, della finestra di osservazione e della profondità dello storico risponde a precise necessità statistiche e architetturali.
+La progettazione di questo modello operativo nasce da un'analisi critica delle più recenti evoluzioni nella letteratura scientifica in ambito *Cybersecurity* (2024-2025). La solidità del sistema non risiede solo nelle formule matematiche adottate, ma nella scelta deliberata di un'architettura che superi gli attuali limiti operativi dell'Intelligenza Artificiale, unita a un rigoroso dimensionamento dei parametri statistici e temporali.
 
-### 4.1 La Soglia di Anomalia ($Z_{robusto} > 3$)
-L'impostazione della soglia di tolleranza $\theta = 3$ non è arbitraria, ma deriva direttamente dalla "Regola Empirica" della statistica descrittiva (nota anche come regola del 68-95-99.7). 
+### 4.1 L'Uso della Statistica Robusta per superare il "Rumore" di Rete
+L'applicazione di modelli statistici classici per la *Network Anomaly Detection* sconta storicamente il limite della sensibilità agli *outlier*: i normali (e legittimi) picchi di traffico aziendale alterano la media aritmetica e la deviazione standard, generando cecità statistica o falsi positivi.
+
+Per risolvere questo problema, la letteratura più recente ha validato l'efficacia della statistica robusta applicata al traffico di rete. Romo-Chavero et al. [1] (2025) propongono un framework in cui la MAD (*Median Absolute Deviation*) viene impiegata per rilevare le anomalie del protocollo BGP, dimostrando che il calcolo delle deviazioni basato sulla Mediana garantisce un'elevata resistenza ai picchi di traffico non malevoli. 
+
+Il modello proposto in questa tesi condivide l'assunto teorico validato da Romo-Chavero et al., adottando la MAD e lo $Z_{robusto}$ come motore statistico per le metriche comportamentali. Tuttavia, se ne distacca per l'efficienza applicativa: mentre nella letteratura accademica la MAD viene spesso usata solo come fase di preparazione dati (*labeling*) per addestrare successivi e pesanti modelli di Machine Learning, il nostro sistema utilizza i superamenti della soglia dello $Z_{robusto}$ per alimentare direttamente il sistema di *scoring*. Questa scelta mantiene intatta la resilienza statistica, ma azzera i costi di addestramento computazionale.
+
+### 4.2 Rilevamento su Traffico Cifrato: Efficienza vs. Complessità
+
+Oggi oltre il 90% del traffico web è protetto da protocolli crittografici (come TLS/HTTPS). Questo ha reso largamente inefficace la tradizionale *Deep Packet Inspection* (DPI), originariamente progettata per leggere il contenuto in chiaro dei pacchetti. Tuttavia, studi recenti come quello di Muttaqien et al. [2] (2025) dimostrano che è possibile identificare le minacce analizzando i metadati non cifrati scambiati durante la fase iniziale di *handshake*. Tra questi indicatori spiccano le impronte crittografiche JA3 e le caratteristiche dei certificati TLS.
+
+Nel loro studio, Muttaqien et al. classificano questi metadati impiegando complesse architetture di *Deep Learning* (modelli ibridi Random Forest e LSTM). Pur garantendo un'elevata accuratezza, queste reti neurali risultano estremamente onerose dal punto di vista computazionale: per addestrare il modello è stato necessario elaborare un dataset di ben 30 milioni di sessioni.
+
+Il nostro modello operativo (metriche $M_{ja3}$ e $M_{cert}$) sfrutta le stesse *feature* crittografiche (JA3 e Certificati TLS), ma adotta una strategia deterministica. Invece di delegare l'analisi a un algoritmo predittivo, il sistema valida i dati confrontandoli in tempo reale con fonti di *Threat Intelligence* (firme malevole note) ed eseguendo controlli logici formali (es. rilevamento di certificati auto-firmati). Questo approccio garantisce un blocco immediato e privo di falsi positivi per le minacce conosciute, risultando molto più leggero, rapido e facilmente implementabile rispetto alle pesanti architetture basate su *Deep Learning*.
+
+### 4.3 Vantaggi Operativi del Risk Scoring Deterministico rispetto all'AI
+
+Sebbene l'Intelligenza Artificiale (AI) sia molto popolare nella ricerca accademica per rilevare le intrusioni di rete, la sua applicazione pratica nel mondo reale sconta diverse criticità. Gli stessi ricercatori che sviluppano questi modelli ammettono spesso la necessità di approcci più snelli e gestibili.
+
+Il primo grande ostacolo riguarda i **costi computazionali e il cosiddetto *Concept Drift***. Come evidenziato dallo studio di Talukder et al. [3] (2025), i modelli di *Machine Learning* richiedono un'enorme potenza di calcolo, rendendoli difficili da usare su reti ad alto traffico. Inoltre, l'AI impara esclusivamente dai dati passati: se gli attaccanti inventano una nuova tecnica per eludere le difese, il modello diventa subito obsoleto (subisce una "deriva del concetto" o *Concept Drift*) e deve essere faticosamente riaddestrato con nuovi dati.
+
+Il secondo problema riguarda le **nuove vulnerabilità e l'effetto "scatola nera" (*Explainability*)**. Acharjya et al. [4] (2025) sottolineano come gli hacker utilizzino già tecniche mirate (*Adversarial Machine Learning*) per inquinare i dati di addestramento e ingannare deliberatamente l'Intelligenza Artificiale. A questo si aggiunge un forte limite operativo intrinseco alle reti neurali: la mancanza di **interpretabilità** (il cosiddetto effetto *Black-Box*). Questo impedisce agli analisti di estrarre la catena logica che ha innescato un allarme, costringendoli a lunghe indagini manuali per validare l'effettiva presenza di una minaccia.
+
+Per superare questi limiti, il nostro modello adotta una strategia di **Risk Scoring statico e deterministico (*White-Box*)**. Invece di affidarsi a previsioni basate sui dati storici, il sistema assegna punteggi di rischio precisi ogni volta che rileva una violazione evidente e oggettiva delle regole di rete (come una scansione interna o l'uso di un protocollo anomalo). Questo approccio algoritmico garantisce tre vantaggi fondamentali:
+1. **Immunità all'inganno (*Adversarial ML*):** Basandosi su regole logiche fisse, il sistema non può essere manipolato o "avvelenato" dall'attaccante.
+2. **Nessun riaddestramento (*Zero-Training*):** Il modello non ha bisogno di imparare costantemente le nuove tattiche d'attacco, perché si concentra sul rilevare le violazioni dei principi di base della rete, che restano sempre invariati.
+3. **Trasparenza Immediata:** L'analista capisce in un istante perché è scattato l'allarme (es. "L'host ha 70 punti: 50 per un certificato falso + 20 per traffico anomalo"), velocizzando drasticamente la risposta all'incidente (*Incident Response*).
+
+### 4.4 Giustificazione dei Parametri Statistici e Temporali
+Una volta definita e validata l'architettura deterministica rispetto allo Stato dell'Arte, è fondamentale dimensionare correttamente i parametri operativi affinché il modello si adatti al traffico reale senza generare *Alert Fatigue*.
+* **La Soglia di Anomalia ($Z_{robusto} > 3$):** L'impostazione della soglia di tolleranza $\theta = 3$ non è arbitraria, ma deriva direttamente dalla "Regola Empirica" della statistica descrittiva (nota anche come regola del 68-95-99.7). 
 
 Assumendo che il traffico di rete tenda a distribuirsi attorno a un valore centrale (la Mediana), la dispersione misurata tramite la MAD ci permette di standardizzare le distanze:
 * Uno Z-Score pari a **1** copre circa il **68%** delle normali fluttuazioni comportamentali.
@@ -174,13 +203,21 @@ Assumendo che il traffico di rete tenda a distribuirsi attorno a un valore centr
 * Uno Z-Score pari a **3** ingloba il **99.7%** dei comportamenti ordinari dell'host.
 
 Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia estremamente conservativa è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire il fenomeno dell'affaticamento da allarmi.
-
-### 4.2 La Finestra di Osservazione (Batch di 1 Ora)
-Le metriche statistiche richiedono l'accumulo di un *set* di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra temporale di osservazione di **1 ora** (rispetto a un'analisi al minuto o giornaliera) come compromesso architetturale ottimale:
+* **La Finestra di Osservazione (Batch di 1 Ora):** Le metriche statistiche richiedono l'accumulo di un *set* di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra temporale di osservazione di **1 ora** (rispetto a un'analisi al minuto o giornaliera) come compromesso architetturale ottimale:
 * **Contro il micro-batch (es. 5 minuti):** Finestre troppo brevi sono sensibili ai "micro-burst" (picchi istantanei legittimi, come il download di un file), che invaliderebbero la statistica generando continuo "rumore".
 * **Contro il macro-batch (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inefficace per la neutralizzazione degli attacchi (*Incident Response*). La finestra oraria garantisce un volume di campioni statisticamente rilevante, mantenendo un tempo di reazione compatibile con le dinamiche di contenimento di un attacco.
+* **La Profondità dello Storico (Baseline di 7 Giorni):** Il calcolo della Mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali, intrinsecamente legata agli orari lavorativi e ai giorni di riposo. La profondità di 7 giorni assicura che il comportamento attuale venga confrontato con una baseline che ha già "imparato" i pattern dell'intera settimana, rendendo il modello consapevole dei cicli aziendali.
 
-### 4.3 La Profondità dello Storico (Baseline di 7 Giorni)
-Il calcolo della Mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali, intrinsecamente legata agli orari lavorativi e ai giorni di riposo. La profondità di 7 giorni assicura che il comportamento attuale venga confrontato con una baseline che ha già "imparato" i pattern dell'intera settimana, rendendo il modello consapevole dei cicli aziendali.
+---
+
+## 5. Riferimenti Bibliografici
+
+[1] M. A. Romo-Chavero, G. de los Ríos Alatorre, J. A. Cantoral-Ceballos, J. A. Pérez-Díaz, and C. Martinez-Cagnazzo, *"A Hybrid Model for BGP Anomaly Detection Using Median Absolute Deviation and Machine Learning"*, IEEE Open Journal of the Communications Society, vol. 6, 2025. [DOI: 10.1109/OJCOMS.2025.3550010](https://doi.org/10.1109/OJCOMS.2025.3550010)
+
+[2] H. Muttaqien, M. Niswar, Z. Zainuddin, and S. Syarif, *"Efficient Identification of Malicious Traffic in TLS Networks Using Machine Learning"*, 2025 IEEE International Conference on Artificial Intelligence and Mechatronics Systems (AIMS), 2025. [DOI: 10.1109/AIMS66189.2025.11229622](https://doi.org/10.1109/AIMS66189.2025.11229622)
+
+[3] A. Talukder and A. Rahman, *"Evaluating the Efficacy of Explainable Machine Learning Algorithms for the Detection and Classification of Network Intrusions"*, 2025 IEEE 2nd International Conference on Computing, Applications and Systems (COMPAS), 2025. [DOI: 10.1109/COMPAS67506.2025.11381867](https://doi.org/10.1109/COMPAS67506.2025.11381867)
+
+[4] K. Acharjya, M. Arora, M. Grover, and M. Eti, *"Application of Artificial Intelligence and Machine Learning Techniques for Network Intrusion Detection and Prevention"*, 2025 International Conference on Networks and Cryptology (NETCRYPT), 2025. [DOI: 10.1109/NETCRYPT65877.2025.11102769](https://doi.org/10.1109/NETCRYPT65877.2025.11102769)
 
 ---
