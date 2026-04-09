@@ -18,14 +18,14 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 
     l'evento viene immediatamente marcato come compromissione certa, restituendo $M_{rep} = 1$.
 
-* **2. Fingerprinting Crittografico del Client ($M_{ja3}$)**
-  * **Razionale Teorico:** La crittografia (TLS/SSL) rende illeggibile il contenuto dei pacchetti, impedendo le analisi tradizionali. Tuttavia, ogni software (browser, script Python, o malware) esegue la fase di handshake in modo unico, dichiarando quali algoritmi e versioni supporta. Questa "firma" permette di identificare il tipo di applicazione che ha originato il traffico, distinguendo un browser legittimo da un tool d'attacco o da un ransomware.
-  * **Implementazione Tecnica:** Il sistema utilizza sonde di ispezione profonda (DPI come Zeek o Suricata) per estrarre cinque parametri specifici dal pacchetto *TLS Client Hello*. Questi parametri vengono concatenati e trasformati in un'impronta digitale univoca di 32 caratteri (Hash MD5), denominata **JA3**. Tale impronta viene confrontata in tempo reale con un database di firme associate a strumenti malevoli (es. Cobalt Strike, Metasploit, o diverse famiglie di malware).
-  * **Formalizzazione:** Sia $\mathcal{J}$ l'insieme delle firme JA3 censite come malevole nelle banche dati di *Threat Intelligence*. Sia $j$ l'impronta JA3 estratta dalla connessione corrente dell'host $h$. Se l'impronta calcolata appartiene all'insieme delle firme note per software d'attacco:
+* **2. Fingerprinting Crittografico del Client ($M_{ja4}$)**
+    * **Razionale Teorico:** L'uso diffuso della crittografia (TLS/SSL) protegge la privacy oscurando il contenuto dei pacchetti, ma al contempo nasconde le attività malevole ai tradizionali sistemi di ispezione. Tuttavia, la fase iniziale di negoziazione (*TLS Client Hello*), che avviene in chiaro, rivela il comportamento del software. Ogni applicazione (browser, script automatizzato o malware) negozia la connessione in modo unico, richiedendo specifici algoritmi, versioni e supporti. L'impronta JA4 cattura questa "firma comportamentale", permettendo di distinguere, ad esempio, un browser aziendale legittimo da uno strumento d'attacco o da un malware, indipendentemente dall'IP contattato.
+    * **Implementazione Tecnica:** Il sistema sfrutta le capacità di ispezione profonda dei NIDS (es. Suricata 7+) per estrarre le caratteristiche della connessione TLS e calcolare l'impronta JA4. Questa impronta (es. `t13d1516h2_8daaf6152771_a56c5b993250`) è modulare e divisa in tre sezioni: un prefisso in chiaro che descrive il protocollo e il numero di estensioni, un hash degli algoritmi crittografici supportati e un hash delle estensioni stesse. Questa firma viene confrontata in tempo reale con i database di *Threat Intelligence* (es. repository FoxIO) contenenti le impronte associate a strumenti malevoli (come Cobalt Strike, Metasploit o script elusivi).
+    * **Formalizzazione:** Sia $\mathcal{J}$ l'insieme delle impronte crittografiche JA4 classificate come malevole o sospette dalle fonti di *Threat Intelligence*. Sia $j$ l'impronta JA4 estratta dal pacchetto *Client Hello* generato dall'host $h$. Se l'impronta calcolata appartiene all'insieme delle firme malevole note:
 
-    $$j \in \mathcal{J}$$
+        $$j \in \mathcal{J}$$
 
-    la metrica certifica l'uso di software non autorizzato o malevolo, restituendo $M_{ja3} = 1$.
+        la metrica certifica l'impiego di software di rete non autorizzato o malevolo, attivandosi e restituendo $M_{ja4} = 1$.
 
 * **3. Anomalie nei Certificati TLS ($M_{cert}$)**
   * **Razionale Teorico:** I siti web e i servizi cloud legittimi utilizzano certificati crittografici emessi da Autorità di Certificazione (CA) pubblicamente riconosciute e attendibili. Le infrastrutture d'attacco o i server C2 (*Command and Control*) improvvisati impiegano frequentemente certificati auto-firmati (*Self-Signed*), scaduti, o generati con parametri di validità palesemente anomali per risparmiare tempo o eludere i controlli di base.
@@ -106,7 +106,7 @@ Il modello operativo non valuta i singoli pacchetti in modo isolato, ma aggrega 
 
 ### 2.1 Frequenza di Calcolo e Normalizzazione Matematica
 Per rispondere all'esigenza di correlare gli eventi senza sovraccaricare il sistema, lo *Score Globale* dell'host viene calcolato (o ricalcolato) in due scenari:
-1. **Event-driven (In tempo reale):** Immediatamente, non appena si attiva una metrica deterministica (es. $M_{rep}$ o $M_{ja3}$).
+1. **Event-driven (In tempo reale):** Immediatamente, non appena si attiva una metrica deterministica (es. $M_{rep}$ o $M_{ja4}$).
 2. **Time-driven (A fine batch):** Allo scadere di ogni finestra oraria (1 ora), aggregando i risultati delle metriche statistiche.
 
 
@@ -121,7 +121,7 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
 
 * **Gravità Critica (+50 punti):** Assegnati a comportamenti con un livello di confidenza quasi assoluto e falsi positivi prossimi allo zero. Una singola violazione (es. contattare una destinazione malevola nota) compromette per metà l'affidabilità del nodo. Due violazioni critiche saturate portano subito lo score a 100.
   * Reputazione Destinazione ($M_{rep}$)
-  * Fingerprinting crittografico JA3 ($M_{ja3}$)
+  * Fingerprinting crittografico JA4 ($M_{ja4}$)
 * **Sospetto Alto (+40 punti):** Anomalie strutturali gravi, ma che richiedono almeno un'altra anomalia secondaria per certificare la compromissione totale (superamento soglia 60).
   * Anomalie Certificati TLS ($M_{cert}$)
   * Funzionalità Server Rilevata ($M_{srv}$)
@@ -174,11 +174,11 @@ Il modello proposto in questa tesi condivide l'assunto teorico validato da Romo-
 
 ### 4.2 Rilevamento su Traffico Cifrato: Efficienza vs. Complessità
 
-Oggi oltre il 90% del traffico web è protetto da protocolli crittografici (come TLS/HTTPS). Questo ha reso largamente inefficace la tradizionale *Deep Packet Inspection* (DPI), originariamente progettata per leggere il contenuto in chiaro dei pacchetti. Tuttavia, studi recenti come quello di Muttaqien et al. [2] (2025) dimostrano che è possibile identificare le minacce analizzando i metadati non cifrati scambiati durante la fase iniziale di *handshake*. Tra questi indicatori spiccano le impronte crittografiche JA3 e le caratteristiche dei certificati TLS.
+Oggi oltre il 90% del traffico web è protetto da protocolli crittografici (come TLS/HTTPS). Questo ha reso largamente inefficace la tradizionale *Deep Packet Inspection* (DPI), originariamente progettata per leggere il contenuto in chiaro dei pacchetti. Tuttavia, studi recenti come quello di Muttaqien et al. (2025) dimostrano che è possibile identificare le minacce analizzando i metadati non cifrati scambiati durante la fase iniziale di *handshake*. Tra questi indicatori spiccano le caratteristiche dei certificati TLS e le impronte crittografiche del client (storicamente basate sullo standard JA3).
 
-Nel loro studio, Muttaqien et al. classificano questi metadati impiegando complesse architetture di *Deep Learning* (modelli ibridi Random Forest e LSTM). Pur garantendo un'elevata accuratezza, queste reti neurali risultano estremamente onerose dal punto di vista computazionale: per addestrare il modello è stato necessario elaborare un dataset di ben 30 milioni di sessioni.
+Nel loro studio, Muttaqien et al. estraggono proprio le vecchie impronte JA3 e le classificano impiegando complesse architetture di *Deep Learning* (modelli ibridi Random Forest e LSTM). Pur garantendo un'elevata accuratezza, queste reti neurali risultano estremamente onerose dal punto di vista computazionale: per addestrare il modello è stato necessario elaborare un dataset di ben 30 milioni di sessioni.
 
-Il nostro modello operativo (metriche $M_{ja3}$ e $M_{cert}$) sfrutta le stesse *feature* crittografiche (JA3 e Certificati TLS), ma adotta una strategia deterministica. Invece di delegare l'analisi a un algoritmo predittivo, il sistema valida i dati confrontandoli in tempo reale con fonti di *Threat Intelligence* (firme malevole note) ed eseguendo controlli logici formali (es. rilevamento di certificati auto-firmati). Questo approccio garantisce un blocco immediato e privo di falsi positivi per le minacce conosciute, risultando molto più leggero, rapido e facilmente implementabile rispetto alle pesanti architetture basate su *Deep Learning*.
+Il nostro modello operativo compie un doppio salto evolutivo rispetto a questo approccio. In primo luogo, aggiorna il set di estrazione adottando il più moderno e robusto standard **JA4** (metrica $M_{ja4}$), che supera i limiti strutturali e le vulnerabilità di collisione del suo predecessore. In secondo luogo, abbandona le pesanti architetture predittive in favore di una strategia deterministica. Invece di delegare l'analisi a una rete neurale, il sistema valida l'impronta JA4 e i Certificati confrontandoli in tempo reale con fonti di *Threat Intelligence* (firme malevole note) ed eseguendo controlli logici formali. Questo approccio garantisce un blocco immediato e privo di falsi positivi per le minacce conosciute, risultando molto più leggero, rapido e facilmente implementabile rispetto alle architetture basate su *Deep Learning*.
 
 ### 4.3 Vantaggi Operativi del Risk Scoring Deterministico rispetto all'AI
 
