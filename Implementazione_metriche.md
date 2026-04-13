@@ -295,3 +295,63 @@ A differenza delle altre metriche, in questo caso l'anomalia è unidirezionale: 
 Pertanto, la metrica si attiva solo se si verificano **due condizioni simultanee**:
 * Se lo scostamento è eccezionale ($Z_{robusto} > 3$) **E** contestualmente la varianza attuale è sensibilmente inferiore alla varianza storica ($V_{batch} \ll \tilde{V}$), si certifica la presenza di un automatismo informatico: **$M_{time} = 1$**.
 * Se lo scostamento rientra nella norma ($Z_{robusto} \le 3$) oppure la varianza è aumentata (traffico più irregolare e "umano"), l'allarme non si attiva: **$M_{time} = 0$**.
+
+### 2.8 Metrica: Tasso di Connessioni Fallite ($M_{fail}$)
+
+**1. Obiettivo Operativo**  
+Individuare tentativi di *stealth scanning* (ricognizione della rete interna) o la disperata ricerca di un server di Comando e Controllo (C2) di riserva tramite algoritmi DGA. Poiché un malware procede "alla cieca", genererà inevitabilmente una vasta percentuale di connessioni rifiutate o andate in *timeout*. L'obiettivo è monitorare la stabilità della navigazione dell'utente e sanzionare crolli improvvisi di affidabilità dell'instradamento.
+
+**2. Acquisizione del Dato (Stato del Flusso in Suricata)**  
+Il NIDS Suricata monitora passivamente l'intero ciclo di vita (TCP *3-way handshake* e chiusura) di ogni connessione. Nel log `eve.json` di tipo `flow`, Suricata compila il campo `"flow" -> "state"`, che indica l'esito della comunicazione (es. `established`, `closed`, oppure stati anomali come `new` o valori che indicano il fallimento del *setup* della connessione a causa di pacchetti RST o mancate risposte).
+
+**3. Logica di Estrazione e Aggregazione**  
+Alla chiusura del batch orario, lo script Python processa tutti i log di flusso in cui l'host è *Originator* (`"src_ip"`). L'elaborazione prevede il conteggio di due variabili:
+1.  **Totale Tentativi ($F_{tot}$):** Il numero complessivo dei flussi generati dall'host verso qualsiasi destinazione.
+2.  **Totale Fallimenti ($F_{fail}$):** Il sottoinsieme di flussi in cui lo stato della connessione indica un mancato recapito o un rifiuto esplicito (es. pacchetti TCP RST ricevuti dal target, o sessioni andate in *timeout* senza risposta).
+
+Lo script calcola quindi il tasso orario di errore: $r_t = \frac{|F_{fail}|}{|F_{tot}|}$.
+
+*Nota (Filtro di Soglia Minima):* Per evitare che una singola connessione fallita su un totale di due connessioni in un'ora generi un falso allarme del 50%, lo script Python implementerà una soglia di sbarramento (es. $|F_{tot}| > 50$). Se l'host ha generato un traffico insignificante nell'ora, il calcolo della metrica viene bypassato, restituendo $0$.
+
+**4. Architettura del Rilevamento (Serie Storiche con InfluxDB)**  
+L'architettura delega la memorizzazione dello stato a **InfluxDB**:
+1.  **Archiviazione:** Il tasso $r_t$ viene salvato nel database temporale.
+2.  **Calcolo Storico:** Si estrae l'array dei tassi di fallimento degli ultimi 7 giorni, calcolando la Mediana ($\tilde{r}$) e la dispersione assoluta ($MAD$). L'uso della statistica robusta è qui vitale per ignorare eventuali disservizi di rete transitori che avrebbero "avvelenato" una media aritmetica classica.
+3.  **Golden Profile:** Per i nuovi host, InfluxDB viene pre-compilato con un tasso di fallimento fisiologico molto basso (es. $1\% - 2\%$), simulando una connessione sana e stabile fin dal primo minuto di monitoraggio.
+
+**5. Calcolo della Metrica (Output)**  
+Lo Z-Score robusto quantifica l'anomalia del tasso di errore:
+
+$$Z_{robusto} = \frac{|r_t - \tilde{r}|}{MAD}$$
+
+Essendo interessati solo a un *peggioramento* della stabilità, l'allarme richiede due condizioni simultanee:
+* Se il tasso di fallimento orario subisce un incremento statisticamente eccezionale ($Z_{robusto} > 3$) **E** risulta superiore alla mediana storica ($r_t > \tilde{r}$), l'anomalia esplorativa è certificata: **$M_{fail} = 1$**.
+* Se il tasso di errore è nella norma ($Z_{robusto} \le 3$) o inferiore al solito, la metrica resta inattiva: **$M_{fail} = 0$**.
+
+### 2.9 Metrica: Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)
+
+**1. Obiettivo Operativo**  
+Intercettare l'istituzione di *Reverse Shell* interattive, tunnel VPN non autorizzati o canali di esfiltrazione lenti e continui (*Low and Slow*). A differenza della normale navigazione web, che è caratterizzata da raffiche brevi e interrotte, una connessione di controllo remoto richiede di mantenere la sessione TCP stabilita e aperta per ore intere, sfidando i normali pattern temporali dell'utente.
+
+**2. Acquisizione del Dato (Età del Flusso in Suricata)**  
+Questa misurazione sfrutta la capacità del NIDS di cronometrare la persistenza delle connessioni. All'interno di ogni evento `flow` generato in `eve.json`, Suricata inserisce il campo `"flow" -> "age"`, che rappresenta la durata esatta della connessione espressa in secondi.
+
+**3. Logica di Estrazione e Aggregazione**  
+Lo script Python filtra dal batch orario tutti i flussi associati all'host monitorato (`"src_ip"`). 
+Per individuare la sessione più sospetta, l'algoritmo non effettua somme o medie, ma estrae il valore massimo assoluto di durata registrato nell'ora corrente tra tutte le connessioni stabilite.
+Questo valore, definito come $x_t = \max(T)$ (dove $T$ è l'insieme delle durate in secondi di tutti i flussi orari), rappresenta il "flusso più persistente" dell'ora.
+
+**4. Architettura del Rilevamento (Serie Storiche e Power-Law)**  
+L'analisi temporale delle durate viene gestita tramite **InfluxDB**:
+1.  **Baseline Storica:** Il valore $x_t$ viene inviato al database. Lo script richiede l'array delle durate massime orarie registrate negli ultimi 7 giorni.
+2.  **Calcolo dei Parametri:** Si calcolano la Mediana ($\tilde{x}$) e la $MAD$. L'uso della statistica robusta è architetturalmente obbligatorio in questo contesto: la durata delle sessioni di rete segue una distribuzione di tipo "Power-Law" (pochissime connessioni lunghissime, moltissime cortissime). Lo $Z_{robusto}$ assorbe le normali fluttuazioni (es. lunghe call su Microsoft Teams) senza far collassare l'affidabilità del rilevamento.
+3.  **Golden Profile:** Il profilo di base iniettato per i nuovi host prevederà durate massime in linea con la normale navigazione web (es. pochi minuti), rendendo il sistema immediatamente sensibile all'apertura di *shell* persistenti.
+
+**5. Calcolo della Metrica (Output)**  
+Il calcolo dello scostamento si applica alla sessione più lunga registrata nell'ora:
+
+$$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
+
+L'attivazione dipende dall'eccezionalità della persistenza:
+* Se la durata massima registrata sfora in modo eccezionale i parametri storici ($Z_{robusto} > 3$) **E** risulta superiore alla persistenza mediana dell'utente ($x_t > \tilde{x}$), si sospetta fortemente un tunnel persistente abusivo: **$M_{dur} = 1$**.
+* Se tutte le connessioni dell'ora rientrano nei normali tempi di chiusura dell'utente ($Z_{robusto} \le 3$), il comportamento è tollerato: **$M_{dur} = 0$**.
