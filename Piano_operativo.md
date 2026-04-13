@@ -98,6 +98,28 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se lo scostamento statistico è eccezionale ($Z_{robusto} > 3$) e, contestualmente, la varianza attuale è nettamente inferiore a quella storica (cioè $V_{batch} \ll \tilde{V}$, indicando un crollo della variabilità temporale), si certifica la presenza di un automatismo informatico e si impone $M_{time} = 1$.
 
+* **11. Tasso di Connessioni Fallite ($M_{fail}$)**
+  * **Razionale Teorico:** Nella normale operatività aziendale, la stragrande maggioranza dei tentativi di connessione (es. *handshake* TCP o richieste DNS) avviati da un client legittimo si conclude con successo. Al contrario, un software malevolo impegnato in attività di ricognizione silenziosa della rete interna (*stealth scanning*) o nella ricerca di un server di Comando e Controllo di riserva (tramite DGA), genererà inevitabilmente una vasta mole di tentativi di connessione a vuoto (esitanti in pacchetti *RST* o *Timeout*). Un'impennata improvvisa del tasso di fallimento astrae perfettamente questo comportamento anomalo di "ricerca alla cieca".
+  * **Implementazione Tecnica:** Il NIDS (Suricata) tiene traccia dello stato di terminazione di ogni connessione bidirezionale, registrando se un flusso è stato stabilito correttamente o se è fallito/rifiutato. Al termine del batch orario, il sistema aggrega tutti i flussi originati dall'host monitorato e calcola il rapporto percentuale tra le connessioni fallite e il totale dei tentativi effettuati, confrontandolo poi con la tolleranza storica dell'host.
+  * **Formalizzazione:** Sia $F_{tot}$ l'insieme di tutti i flussi di rete originati dall'host $h$ nella finestra oraria corrente $t$. Sia $F_{fail} \subseteq F_{tot}$ il sottoinsieme dei flussi terminati con esito anomalo. Il tasso di fallimento orario è definito come:
+
+    $$r_t = \frac{|F_{fail}|}{|F_{tot}|}$$
+
+    Siano $\tilde{r}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* dei tassi di fallimento storici (finestra mobile di 7 giorni). Il sistema calcola lo scostamento statistico standardizzato:
+
+    $$Z_{robusto} = \frac{|r_t - \tilde{r}|}{MAD}$$
+
+    Se il tasso di errore subisce un incremento eccezionale rispetto alla consuetudine dell'host ($Z_{robusto} > 3$), l'anomalia esplorativa viene certificata, portando $M_{fail} = 1$.
+
+* **12. Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)**
+  * **Razionale Teorico:** Il traffico web generato da un utente umano è intrinsecamente "a raffiche" (*bursty*): le connessioni vengono aperte per scaricare risorse e chiuse rapidamente. Al contrario, un attaccante che stabilisce una *Reverse Shell* o un tunnel persistente necessita di mantenere la sessione aperta per ore o giorni per inviare comandi interattivi o esfiltrare dati. Questa metrica identifica i flussi che rimangono attivi per tempi sproporzionati rispetto alla norma statistica dell'host.
+  * **Implementazione Tecnica:** Il sistema analizza il campo `flow.age` nei log di Suricata, che indica la durata in secondi di ogni sessione. Allo scadere del batch orario, si estrae il valore massimo di durata osservato tra tutti i flussi attivi o chiusi nell'ora. Questo dato viene confrontato con la distribuzione storica (ultimi 7 giorni) delle durate massime registrate dall'host.
+  * **Formalizzazione:** Sia $T$ l'insieme delle durate (in secondi) dei flussi originati dall'host $h$ nell'ora $t$. Sia $x_t = \max(T)$ il valore di persistenza massima. Siano $\tilde{x}$ e $MAD$ la Mediana e la *Median Absolute Deviation* storiche. Lo scostamento standardizzato è:
+    
+    $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
+    
+    Se $Z_{robusto} > 3$ e la durata osservata è superiore alla mediana ($x_t > \tilde{x}$), si identifica una persistenza anomala e si impone $M_{dur} = 1$.
+
 ---
 
 ## 2. Sistema di Scoring Additivo e Normalizzazione (0-100)
@@ -128,6 +150,8 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
 * **Evasione e Ricognizione (+30 punti):** Comportamenti tipici delle fasi intermedie di un attacco (es. movimenti laterali), che potrebbero però coincidere con rari interventi di amministrazione IT.
   * Protocollo su Porta Non Standard ($M_{proto}$)
   * Scansione interna / Fan-out ($M_{scan}$)
+  * Tasso di Connessioni Fallite ($M_{fail}$)
+  * Anomalie di Durata Sessione ($M_{dur}$)
 * **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie puramente quantitative. Hanno un'alta probabilità di falsi positivi (es. un dipendente che usa WeTransfer genera un'asimmetria volumetrica), pertanto il peso ridotto garantisce che l'host rimanga in "zona verde/sicura" se l'evento è isolato.
   * Esplorazione Inedita ($M_{new}$)
   * Asimmetria Volumetrica ($M_{vol}$)
@@ -137,7 +161,7 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
 
 L'equazione finale per il calcolo dello *Score Globale* dell'host risulta matematicamente limitata a un valore massimo di 100 tramite la funzione minimo:
 
-$$S(h) = \min\left(100, \sum_{i=1}^{10} \text{Punti}_i \cdot M_i\right)$$
+$$S(h) = \min\left(100, \sum_{i=1}^{12} \text{Punti}_i \cdot M_i\right)$$
 
 ---
 
