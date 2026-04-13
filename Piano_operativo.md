@@ -36,20 +36,29 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 
     il canale di comunicazione viene marcato come inaffidabile o potenzialmente compromesso, attivando $M_{cert} = 1$.
 
+* **4. Evasione SNI nel Traffico Cifrato ($M_{sni}$)**
+  * **Razionale Teorico:** Nel traffico HTTPS legittimo generato da browser o applicazioni moderne, il client inserisce sempre il nome del dominio di destinazione in chiaro durante la fase di *handshake* TLS (estensione SNI - *Server Name Indication*). Gli strumenti di *hacking* amatoriali, gli script malevoli o i malware che tentano di nascondersi contattando direttamente un indirizzo IP nudo omettendo l'estensione SNI, generano un'anomalia strutturale non tollerabile in una rete sicura.
+  * **Implementazione Tecnica:** Il motore NIDS analizza l'handshake TLS in uscita. Se viene rilevata una connessione crittografata diretta verso l'esterno in cui il campo `tls.sni` risulta completamente assente o vuoto, il sistema intercetta l'evasione in tempo reale prima ancora che il tunnel cifrato venga stabilito.
+  * **Formalizzazione:** Sia $f$ un flusso di rete crittografato (TLS) originato dall'host $h$ verso un IP pubblico. Sia $SNI(f)$ la funzione che estrae la stringa del *Server Name Indication*. Se il campo è vuoto:
+
+    $$SNI(f) = \emptyset$$
+
+    Il sistema certifica l'uso di software di rete anomalo, assegnando la penalità immediata: $M_{sni} = 1$.
+
 ### 1.B Metriche Statistiche e Comportamentali (Finestra di 1 ora)
 Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispetto allo stato di quiete dell'host. Sfruttano l'ispezione profonda, la teoria degli insiemi (Novelty Detection) e lo scostamento statistico standardizzato ($Z_{robusto}$). Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni**.
 
-* **4. Rilevamento Funzionalità Server ($M_{srv}$)**
+* **5. Rilevamento Funzionalità Server ($M_{srv}$)**
   * **Razionale Teorico:** In una rete aziendale standard, una normale *workstation* opera tipicamente come "Client", originando traffico verso l'esterno. L'apertura improvvisa di una porta locale in ascolto (socket) che accetta con successo connessioni in ingresso indica un'inversione di ruolo, sintomo critico dell'installazione di una *backdoor* o di un movimento laterale. Il sistema adotta un approccio **Zero Trust**: ogni inversione di ruolo genera un'anomalia. Si esclude deliberatamente l'uso di "Whitelist" per gli IP di amministrazione IT, poiché la compromissione di un nodo autorizzato permetterebbe all'attaccante di muoversi lateralmente eludendo la metrica.
   * **Implementazione Tecnica:** Il monitoraggio si basa sull'analisi deterministica dei flussi di rete (tramite sonde come NetFlow o Zeek) a livello di trasporto (L4). Per il protocollo TCP, un host interno agisce da server se invia pacchetti con flag `SYN-ACK` in risposta a un `SYN`. Nei log di flusso, ciò si traduce nell'osservare l'host monitorato con il ruolo di *Responder* in una sessione contrassegnata come stabilita.
   * **Formalizzazione:** Sia $F$ l'insieme dei flussi di rete bidirezionali stabiliti con successo. Un singolo flusso $f \in F$ è definito dalla tupla $(o, r)$, dove $o$ è l'host *Originator* (chi inizia la connessione) e $r$ è l'host *Responder* (chi accetta la connessione). Se per l'host monitorato $h$ esiste almeno un flusso $f$ in cui esso compare come ricevitore ($h = r$), si certifica l'inversione di ruolo e si impone $M_{srv} = 1$.
 
-* **5. Protocollo su Porta Non Standard ($M_{proto}$)**
+* **6. Protocollo su Porta Non Standard ($M_{proto}$)**
   * **Razionale Teorico:** I firewall perimetrali tradizionali bloccano il traffico basandosi sulle porte logiche (Livello 4). Per eludere queste restrizioni, gli attaccanti instradano traffico anomalo (es. protocolli di amministrazione remota come SSH, o tunnel VPN) su porte tipicamente sempre aperte e riservate al traffico web (come la porta 80 o 443).
   * **Implementazione Tecnica:** La misurazione richiede l'impiego di sonde di *Deep Packet Inspection* (DPI), come Zeek o librerie come nDPI. Questi strumenti analizzano la firma strutturale del *payload* del pacchetto per identificare il reale protocollo applicativo (Livello 7), indipendentemente dalla porta utilizzata. Il sistema estrae il metadato L7 e lo confronta con lo standard IANA atteso per la porta di destinazione (L4) del flusso.
   * **Formalizzazione:** Sia $p$ la porta logica di destinazione di un flusso di rete. Sia $\mathcal{M}(p)$ la funzione che mappa la porta $p$ al suo protocollo applicativo standard atteso (ad esempio, $\mathcal{M}(443) = \text{TLS}$). Sia $L7_{DPI}$ il reale protocollo applicativo identificato dalla sonda tramite ispezione profonda. Se l'analizzatore identifica con certezza un protocollo che diverge dallo standard atteso ( $L7_{DPI} \neq \mathcal{M}(p)$ ), viene certificato un tentativo di evasione o un mascheramento del traffico, fissando $M_{proto} = 1$.
 
-* **6. Scansione Interna o Fan-out ($M_{scan}$)**
+* **7. Scansione Interna o Fan-out ($M_{scan}$)**
   * **Razionale Teorico:** Un host standard all'interno di un'architettura di rete comunica tipicamente con un numero stabile e limitato di nodi interni (es. domain controller, file server, stampanti). Un incremento improvviso e massiccio del "Fan-out" (il numero di host distinti contattati) è il sintomo primario di una fase di ricognizione automatizzata (*Network Discovery*) o del tentativo di propagazione di un'infezione (Movimento Laterale).
   * **Implementazione Tecnica:** Il calcolo viene effettuato aggregando i log di flusso direzionali (es. NetFlow) alla chiusura della finestra oraria (batch). Il sistema filtra esclusivamente i flussi in cui l'host monitorato agisce come *Originator* e in cui l'indirizzo IP di destinazione appartiene allo spazio di indirizzamento interno dell'organizzazione (es. subnet RFC 1918). Viene quindi estratto il numero di indirizzi IP di destinazione unici.
   * **Formalizzazione:** Sia $D_{int}$ l'insieme degli IP interni univoci contattati dall'host $h$ nella finestra oraria corrente $t$. La variabile osservata è la cardinalità dell'insieme: $x_t = |D_{int}|$. Siano $\tilde{x}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* calcolate sulla distribuzione storica della stessa variabile $x$ per l'host $h$ negli ultimi 7 giorni. Il sistema calcola lo scostamento statistico standardizzato:
@@ -58,7 +67,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se il valore risultante indica un picco eccezionale ($Z_{robusto} > 3$), l'anomalia esplorativa è certificata e si impone $M_{scan} = 1$.
 
-* **7. Esplorazione di Protocolli Inediti ($M_{new}$)**
+* **8. Esplorazione di Protocolli Inediti ($M_{new}$)**
   * **Razionale Teorico:** Un host aziendale standard possiede una "firma comportamentale" applicativa ben definita e ripetitiva (es. navigazione web via HTTP/TLS, risoluzione nomi via DNS, protocolli di posta). L'esordio improvviso di protocolli di Livello 7 mai utilizzati in precedenza dalla macchina (come traffico *Peer-to-Peer* per l'esfiltrazione, *routing* anonimo tramite Tor, o protocolli di amministrazione remota come RDP/SSH) è un indicatore primario dell'esecuzione di un *payload* malevolo o della compromissione del nodo.
   * **Implementazione Tecnica:** L'analisi si affida ai log generati da un motore di *Deep Packet Inspection* (DPI, es. Zeek o nDPI), che estrae con precisione l'identificativo del protocollo applicativo incapsulato nel *payload*, ignorando la porta L4. Al termine di ogni batch orario, il sistema aggrega tutti i protocolli L7 identificati per l'host e li confronta con il "profilo applicativo" appreso dinamicamente (la *baseline* ricavata dai log degli ultimi 7 giorni).
   * **Formalizzazione:** Applicando i principi della *Novelty Detection* tramite la teoria degli insiemi, sia $P_{storico}$ l'insieme di tutti i protocolli applicativi (L7) univoci generati dall'host $h$ nella finestra di apprendimento mobile di 7 giorni. Sia $P_{batch}$ l'insieme dei protocolli applicativi estratti dal traffico dell'host $h$ nell'ultima ora di monitoraggio. Se l'insieme differenza tra i due non risulta vuoto:
@@ -67,7 +76,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
     
     significa che è comparso almeno un protocollo totalmente inedito per la storicità del nodo. In tal caso, si fissa $M_{new} = 1$.
 
-* **8. Asimmetria Volumetrica in Uscita ($M_{vol}$)**
+* **9. Asimmetria Volumetrica in Uscita ($M_{vol}$)**
   * **Razionale Teorico:** Nella normale operatività aziendale, una postazione di lavoro ha un profilo di traffico asimmetrico sbilanciato verso il *download* (scaricamento di file, navigazione web, ricezione posta). Un ribaltamento improvviso di questa dinamica, caratterizzato da un trasferimento massivo di dati dall'host verso l'esterno (*upload*), astrae il concetto critico di esfiltrazione di dati sensibili o di invio di archivi verso un server *Drop point* controllato da un attaccante.
   * **Implementazione Tecnica:** Il calcolo aggrega la telemetria di base dei flussi di rete direzionali (NetFlow o log del Firewall) alla chiusura del batch orario. Il sistema filtra i flussi uscenti (dove l'host monitorato è *Originator* e la destinazione è un IP esterno) e somma il valore del campo "Byte trasmessi" (o `bytes_out`).
   * **Formalizzazione:** Sia $V_{out}$ il volume totale in byte trasmessi verso l'esterno dall'host $h$ nella finestra oraria corrente $t$. Siano $\tilde{V}$ e $MAD$ la Mediana e la *Median Absolute Deviation* dei volumi in uscita storici (finestra di 7 giorni). Il sistema calcola lo Z-Score robusto per quantificare l'anomalia volumetrica:
@@ -76,7 +85,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
     
     Se il picco di trasferimento genera uno scostamento eccezionale rispetto alla varianza abituale ($Z_{robusto} > 3$), l'esfiltrazione o l'asimmetria anomala viene certificata, portando $M_{vol} = 1$.
     
-* **9. Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)**
+* **10. Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)**
   * **Razionale Teorico:** Alcuni attacchi avanzati (come il *DNS Tunneling* o i malware DGA) sfruttano il normale traffico DNS per nascondere informazioni. Invece di chiedere alla rete di tradurre nomi a dominio legittimi, gli attaccanti incapsulano dati esfiltrati o comandi all'interno di stringhe lunghissime e generate in modo pseudo-casuale (es. `x9k2js8...malicious.com`).
   * **Implementazione Tecnica:** L'analizzatore estrae i nomi a dominio completi (FQDN) direttamente dalle richieste registrate nei log del server DNS aziendale o tramite sonde di traffico passivo. Su ogni stringa estratta viene calcolata l'Entropia di Shannon, un indicatore matematico che ne misura il "livello di disordine" o casualità dei caratteri. Al termine della finestra oraria, si calcola l'entropia aggregata delle richieste e la si confronta con il profilo abituale dell'host.
   * **Formalizzazione:** Sia $q$ la stringa del dominio interrogato e $p_i$ la frequenza con cui compare l'i-esimo carattere nella parola. L'Entropia di Shannon per la singola richiesta è calcolata come:
@@ -89,7 +98,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se il livello di disordine delle stringhe genera uno scostamento incompatibile con le normali abitudini dell'host ($Z_{robusto} > 3$), si registra un abuso del protocollo e si fissa $M_{dns} = 1$.
 
-* **10. Rigidità Temporale e Automazione ($M_{time}$)**
+* **11. Rigidità Temporale e Automazione ($M_{time}$)**
   * **Razionale Teorico:** I processi infetti (come le *botnet*) comunicano con i server esterni di Comando e Controllo (C2) utilizzando cicli algoritmici preimpostati. Questo genera comunicazioni periodiche estremamente precise (effetto *heartbeat* o battito cardiaco), in netto contrasto con l'elevata variabilità temporale che caratterizza la normale navigazione umana.
   * **Implementazione Tecnica:** Il sistema analizza i *timestamp* di inizio dei flussi di rete verso destinazioni esterne (es. log NetFlow). Viene calcolato il tempo di inter-arrivo, ovvero l'intervallo temporale che trascorre tra la generazione di un flusso e il successivo. Alla fine del batch orario, si valuta la varianza di questi intervalli. Una varianza che crolla verso lo zero indica una forte automazione meccanica e innaturale.
   * **Formalizzazione:** Sia $\Delta t_i$ il tempo trascorso tra l'inizio di un flusso di rete e il successivo. Sia $V_{batch}$ la varianza di questi intervalli temporali registrata nell'ora corrente per l'host $h$. Confrontandola con la Mediana storica $\tilde{V}$ e la $MAD$, si calcola lo scostamento:
@@ -98,7 +107,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se lo scostamento statistico è eccezionale ($Z_{robusto} > 3$) e, contestualmente, la varianza attuale è nettamente inferiore a quella storica (cioè $V_{batch} \ll \tilde{V}$, indicando un crollo della variabilità temporale), si certifica la presenza di un automatismo informatico e si impone $M_{time} = 1$.
 
-* **11. Tasso di Connessioni Fallite ($M_{fail}$)**
+* **12. Tasso di Connessioni Fallite ($M_{fail}$)**
   * **Razionale Teorico:** Nella normale operatività aziendale, la stragrande maggioranza dei tentativi di connessione (es. *handshake* TCP o richieste DNS) avviati da un client legittimo si conclude con successo. Al contrario, un software malevolo impegnato in attività di ricognizione silenziosa della rete interna (*stealth scanning*) o nella ricerca di un server di Comando e Controllo di riserva (tramite DGA), genererà inevitabilmente una vasta mole di tentativi di connessione a vuoto (esitanti in pacchetti *RST* o *Timeout*). Un'impennata improvvisa del tasso di fallimento astrae perfettamente questo comportamento anomalo di "ricerca alla cieca".
   * **Implementazione Tecnica:** Il NIDS (Suricata) tiene traccia dello stato di terminazione di ogni connessione bidirezionale, registrando se un flusso è stato stabilito correttamente o se è fallito/rifiutato. Al termine del batch orario, il sistema aggrega tutti i flussi originati dall'host monitorato e calcola il rapporto percentuale tra le connessioni fallite e il totale dei tentativi effettuati, confrontandolo poi con la tolleranza storica dell'host.
   * **Formalizzazione:** Sia $F_{tot}$ l'insieme di tutti i flussi di rete originati dall'host $h$ nella finestra oraria corrente $t$. Sia $F_{fail} \subseteq F_{tot}$ il sottoinsieme dei flussi terminati con esito anomalo. Il tasso di fallimento orario è definito come:
@@ -111,7 +120,7 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se il tasso di errore subisce un incremento eccezionale rispetto alla consuetudine dell'host ($Z_{robusto} > 3$), l'anomalia esplorativa viene certificata, portando $M_{fail} = 1$.
 
-* **12. Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)**
+* **13. Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)**
   * **Razionale Teorico:** Il traffico web generato da un utente umano è intrinsecamente "a raffiche" (*bursty*): le connessioni vengono aperte per scaricare risorse e chiuse rapidamente. Al contrario, un attaccante che stabilisce una *Reverse Shell* o un tunnel persistente necessita di mantenere la sessione aperta per ore o giorni per inviare comandi interattivi o esfiltrare dati. Questa metrica identifica i flussi che rimangono attivi per tempi sproporzionati rispetto alla norma statistica dell'host.
   * **Implementazione Tecnica:** Il sistema analizza il campo `flow.age` nei log di Suricata, che indica la durata in secondi di ogni sessione. Allo scadere del batch orario, si estrae il valore massimo di durata osservato tra tutti i flussi attivi o chiusi nell'ora. Questo dato viene confrontato con la distribuzione storica (ultimi 7 giorni) delle durate massime registrate dall'host.
   * **Formalizzazione:** Sia $T$ l'insieme delle durate (in secondi) dei flussi originati dall'host $h$ nell'ora $t$. Sia $x_t = \max(T)$ il valore di persistenza massima. Siano $\tilde{x}$ e $MAD$ la Mediana e la *Median Absolute Deviation* storiche. Lo scostamento standardizzato è:
@@ -119,6 +128,24 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
     $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
     
     Se $Z_{robusto} > 3$ e la durata osservata è superiore alla mediana ($x_t > \tilde{x}$), si identifica una persistenza anomala e si impone $M_{dur} = 1$.
+
+* **14. Tempesta ARP e Ricognizione L2 ($M_{arp}$)**
+  * **Razionale Teorico:** Prima di poter propagare un'infezione nella rete locale (es. un *Worm* o un *Ransomware* autopropagante), il malware deve mappare fisicamente i dispositivi adiacenti a Livello 2 (Data Link). Per farlo, genera una tempesta di richieste ARP (*Broadcast Storm*) chiedendo i MAC address di tutti i possibili IP della sottorete. Questo comportamento genera un picco volumetrico di protocolli di servizio totalmente estraneo alla normale navigazione umana.
+  * **Implementazione Tecnica:** Il sensore di rete conta il numero totale di richieste ARP generate dall'host nella finestra oraria e lo confronta con il volume mediano storico.
+  * **Formalizzazione:** Sia $A_t$ il numero totale di query ARP originate da $h$ nell'ora corrente $t$. Siano $\tilde{A}$ e $MAD$ la Mediana e la dispersione assoluta dei volumi ARP storici. Lo scostamento è:
+
+    $$Z_{robusto} = \frac{|A_t - \tilde{A}|}{MAD}$$
+
+    Se il volume di traffico L2 subisce un incremento eccezionale ($Z_{robusto} > 3$) indicando una mappatura fisica ostile, si impone $M_{arp} = 1$.
+
+* **15. Latenza RTT e Routing Occulto ($M_{rtt}$)**
+  * **Razionale Teorico:** Le normali comunicazioni aziendali verso servizi Cloud (es. AWS, Microsoft) presentano tempi di andata e ritorno (*Round Trip Time* - RTT) molto bassi e stabili. Se un host viene compromesso e inizia a comunicare con un server C2 remoto (es. in Asia o Est Europa) o incanala il traffico attraverso reti di anonimato come Tor, la latenza subirà un drastico e inspiegabile aumento dovuto all'instradamento fisico.
+  * **Implementazione Tecnica:** Il NIDS calcola passivamente la latenza di rete durante il *3-way handshake* TCP. Il sistema estrae la Mediana oraria della latenza per le connessioni in uscita e la confronta con la *baseline* storica di latenza dell'host.
+  * **Formalizzazione:** Sia $L$ la latenza mediana (in millisecondi) calcolata sui flussi in uscita dell'host nell'ora corrente. Definiamo $M$ come la mediana storica della latenza (calcolata sui 7 giorni precedenti) e $MAD$ la sua dispersione assoluta. Lo scostamento standardizzato (Z-Score robusto) viene calcolato come:
+
+    $$Z = \frac{|L - M|}{MAD}$$
+
+    Se la latenza subisce un netto deterioramento direzionale, concretizzandosi in uno scostamento statisticamente eccezionale ($Z > 3$) con $L \gg M$, si certifica la presenza di un routing anomalo, attivando la metrica: $M_{rtt} = 1$.
 
 ---
 
@@ -144,6 +171,7 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
 * **Gravità Critica (+50 punti):** Assegnati a comportamenti con un livello di confidenza quasi assoluto e falsi positivi prossimi allo zero. Una singola violazione (es. contattare una destinazione malevola nota) compromette per metà l'affidabilità del nodo. Due violazioni critiche saturate portano subito lo score a 100.
   * Reputazione Destinazione ($M_{rep}$)
   * Fingerprinting crittografico JA4 ($M_{ja4}$)
+  * Evasione SNI nel Traffico Cifrato ($M_{sni}$)
 * **Sospetto Alto (+40 punti):** Anomalie strutturali gravi, ma che richiedono almeno un'altra anomalia secondaria per certificare la compromissione totale (superamento soglia 60).
   * Anomalie Certificati TLS ($M_{cert}$)
   * Funzionalità Server Rilevata ($M_{srv}$)
@@ -152,6 +180,8 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
   * Scansione interna / Fan-out ($M_{scan}$)
   * Tasso di Connessioni Fallite ($M_{fail}$)
   * Anomalie di Durata Sessione ($M_{dur}$)
+  * Tempesta ARP e Ricognizione L2 ($M_{arp}$)
+  * Latenza RTT e Routing Occulto ($M_{rtt}$)
 * **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie puramente quantitative. Hanno un'alta probabilità di falsi positivi (es. un dipendente che usa WeTransfer genera un'asimmetria volumetrica), pertanto il peso ridotto garantisce che l'host rimanga in "zona verde/sicura" se l'evento è isolato.
   * Esplorazione Inedita ($M_{new}$)
   * Asimmetria Volumetrica ($M_{vol}$)
@@ -161,7 +191,7 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
 
 L'equazione finale per il calcolo dello *Score Globale* dell'host risulta matematicamente limitata a un valore massimo di 100 tramite la funzione minimo:
 
-$$S(h) = \min\left(100, \sum_{i=1}^{12} \text{Punti}_i \cdot M_i\right)$$
+$$S(h) = \min\left(100, \sum_{i=1}^{15} \text{Punti}_i \cdot M_i\right)$$
 
 ---
 
