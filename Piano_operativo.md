@@ -228,7 +228,7 @@ Il modello proposto in questa tesi condivide l'assunto teorico validato da Romo-
 
 ### 4.2 Rilevamento su Traffico Cifrato: Efficienza vs. Complessità
 
-Oggi oltre il 90% del traffico web è protetto da protocolli crittografici (come TLS/HTTPS). Questo ha reso largamente inefficace la tradizionale *Deep Packet Inspection* (DPI), originariamente progettata per leggere il contenuto in chiaro dei pacchetti. Tuttavia, studi recenti come quello di Muttaqien et al. (2025) dimostrano che è possibile identificare le minacce analizzando i metadati non cifrati scambiati durante la fase iniziale di *handshake*. Tra questi indicatori spiccano le caratteristiche dei certificati TLS e le impronte crittografiche del client (storicamente basate sullo standard JA3).
+Oggi oltre il 90% del traffico web è protetto da protocolli crittografici (come TLS/HTTPS). Questo ha reso largamente inefficace la tradizionale *Deep Packet Inspection* (DPI), originariamente progettata per leggere il contenuto in chiaro dei pacchetti. Tuttavia, studi recenti come quello di Muttaqien et al. [2] (2025) dimostrano che è possibile identificare le minacce analizzando i metadati non cifrati scambiati durante la fase iniziale di *handshake*. Tra questi indicatori spiccano le caratteristiche dei certificati TLS e le impronte crittografiche del client (storicamente basate sullo standard JA3).
 
 Nel loro studio, Muttaqien et al. estraggono proprio le vecchie impronte JA3 e le classificano impiegando complesse architetture di *Deep Learning* (modelli ibridi Random Forest e LSTM). Pur garantendo un'elevata accuratezza, queste reti neurali risultano estremamente onerose dal punto di vista computazionale: per addestrare il modello è stato necessario elaborare un dataset di ben 30 milioni di sessioni.
 
@@ -262,6 +262,26 @@ Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ signi
 * **Contro il macro-batch (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inefficace per la neutralizzazione degli attacchi (*Incident Response*). La finestra oraria garantisce un volume di campioni statisticamente rilevante, mantenendo un tempo di reazione compatibile con le dinamiche di contenimento di un attacco.
 * **La Profondità dello Storico (Baseline di 7 Giorni):** Il calcolo della Mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali, intrinsecamente legata agli orari lavorativi e ai giorni di riposo. La profondità di 7 giorni assicura che il comportamento attuale venga confrontato con una baseline che ha già "imparato" i pattern dell'intera settimana, rendendo il modello consapevole dei cicli aziendali.
 
+### 4.5 Validazione Funzionale e Robustezza della Rilevazione di Evasione SNI
+
+Quando navighiamo su internet, un'informazione chiamata SNI (*Server Name Indication*) viaggia in chiaro e rivela il nome del sito a cui ci stiamo collegando. Anche se questo rappresenta un piccolo compromesso per la privacy, uno studio recente (Shamsimukhametov et al., [5] 2022) ha dimostrato che leggere l'SNI è fondamentale per i sistemi aziendali che devono controllare e mettere in sicurezza la rete.
+
+Proprio perché l'SNI è così utile ai sistemi di difesa, i virus e i programmi usati dagli hacker cercano di nasconderlo. A volte lo falsificano usando nomi innocui (come "google.com") per aggirare i controlli, altre volte usano la tecnica più basilare di cancellarlo del tutto, provando a connettersi verso l'esterno usando solo l'indirizzo IP numerico del server.
+
+È qui che entra in gioco la nostra metrica **M_sni**. Nella navigazione normale di un dipendente (es. tramite browser), l'SNI è sempre presente perché è richiesto dal server per instaurare correttamente la connessione. Di conseguenza, se dal computer parte una connessione in cui l'SNI manca completamente, il nostro sistema rileva subito un'evidente anomalia strutturale, tipica di un software malevolo, e fa scattare l'allarme. 
+
+Infine, questo metodo di controllo rimane efficace anche contro i nuovi standard che mirano a nascondere e cifrare l'SNI (come la tecnologia ECH). Anche quando queste tecnologie nascondono i dati, la struttura del pacchetto di rete deve comunque rispettare delle regole rigide e fisse. Se il malware tenta di alterare la connessione omettendo delle parti fondamentali, il nostro modello rileva l'irregolarità strutturale e blocca la minaccia prima ancora di doverne leggere il contenuto.
+
+### 4.6 Evoluzione del Ransomware e Necessità della Metrica di Ricognizione ($M_{arp}$)
+
+Negli ultimi anni, il panorama delle minacce informatiche ha subito una trasformazione radicale. Come analizzato nel recente e vasto studio di Razaulla et al. [6] (2023) sull'evoluzione e la tassonomia dei ransomware, questi attacchi non si limitano più a infettare e bloccare un singolo computer isolato. Le varianti moderne (sempre più spesso distribuite tramite modelli commerciali organizzati come il *Ransomware-as-a-Service*) puntano a massimizzare i danni e i profitti paralizzando intere infrastrutture aziendali.
+
+Per raggiungere questo scopo devastante, prima di avviare la vera e propria cifratura dei file, il ransomware attraversa una fase di preparazione silenziosa. In questo lasso di tempo, il software malevolo esegue una mappatura aggressiva della rete locale alla ricerca di altri dispositivi vulnerabili o di *file server* condivisi verso cui propagarsi (una tecnica nota come movimento laterale). 
+
+A livello base della rete (Livello 2 o *Data Link*), questa esplorazione si traduce nell'invio di una "tempesta" di richieste ARP (ARP storm): il computer infetto interroga freneticamente la rete per scoprire gli indirizzi fisici (MAC address) di tutti i dispositivi circostanti.
+
+È proprio in questa fase critica che interviene la nostra metrica $M_{arp}$. Invece di agire in ritardo cercando firme note o file già cifrati, il nostro modello operativo valuta il volume di queste richieste di servizio L2. Poiché una tempesta ARP rappresenta un comportamento totalmente innaturale per la normale operatività di un dipendente, il calcolo statistico del nostro sistema ($Z_{robusto}$) rileva immediatamente il picco esplorativo. Questo approccio garantisce l'isolamento tempestivo del nodo compromesso, bloccando il ransomware nella sua fase preparatoria e prevenendo la compromissione dell'intera rete aziendale.
+
 ---
 
 ## 5. Riferimenti Bibliografici
@@ -273,5 +293,9 @@ Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ signi
 [3] A. Talukder and A. Rahman, *"Evaluating the Efficacy of Explainable Machine Learning Algorithms for the Detection and Classification of Network Intrusions"*, 2025 IEEE 2nd International Conference on Computing, Applications and Systems (COMPAS), 2025. [DOI: 10.1109/COMPAS67506.2025.11381867](https://doi.org/10.1109/COMPAS67506.2025.11381867)
 
 [4] K. Acharjya, M. Arora, M. Grover, and M. Eti, *"Application of Artificial Intelligence and Machine Learning Techniques for Network Intrusion Detection and Prevention"*, 2025 International Conference on Networks and Cryptology (NETCRYPT), 2025. [DOI: 10.1109/NETCRYPT65877.2025.11102769](https://doi.org/10.1109/NETCRYPT65877.2025.11102769)
+
+[5] D. Shamsimukhametov, A. Kurapov, M. Liubogoshchev, and E. Khorov, *"Is Encrypted ClientHello a Challenge for Traffic Classification?"*, IEEE Access, vol. 10, pp. 77883-77897, 2022. [DOI: 10.1109/ACCESS.2022.3191431](https://doi.org/10.1109/ACCESS.2022.3191431)
+
+[6] S. Razaulla, C. Fachkha, C. Markarian, A. Gawanmeh, W. Mansoor, B. C. Fung, and C. Assi, *"The Age of Ransomware: A Survey on the Evolution, Taxonomy, and Research Directions"*, IEEE Access, vol. 11, pp. 40698-40723, 2023. [DOI: 10.1109/ACCESS.2023.3268535](https://doi.org/10.1109/ACCESS.2023.3268535)
 
 ---
