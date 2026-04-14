@@ -86,6 +86,27 @@ L'esito dei controlli formali determina l'attivazione della penalità in modo bo
 * Se si verifica **almeno una** delle condizioni di anomalia (il certificato è auto-firmato OPPURE risulta scaduto/non valido temporalmente), il canale di comunicazione è ritenuto inaffidabile. Il sistema assegna la penalità: **$M_{cert} = 1$**.
 * Se il certificato è stato emesso da terzi e risulta in corso di validità, il traffico è considerato regolare: **$M_{cert} = 0$**.
 
+### 1.4 Metrica: Evasione SNI nel Traffico Cifrato ($M_{sni}$)
+
+**1. Obiettivo Operativo**
+Identificare l'uso di software di rete non standard, script malevoli o tentativi di connessione diretta ad indirizzi IP che omettono l'estensione SNI (*Server Name Indication*). Poiché ogni browser moderno e applicazione legittima specifica il nome del dominio per negoziare il certificato corretto, l'assenza di tale campo è un segnale inequivocabile di traffico generato da strumenti custom o malware che tentano di evadere i controlli basati su DNS.
+
+**2. Acquisizione del Dato (Ispezione TLS)**
+Suricata eccelle nella decodifica dei pacchetti di *handshake*. La metrica analizza specificamente l'evento `event_type: tls` generato durante il pacchetto "Client Hello". Il campo osservato è `tls.sni`. Se Suricata rileva una sessione crittografata ma non riesce ad estrarre alcuna stringa dal campo SNI, genera un log che viene immediatamente processato.
+
+**3. Logica di Estrazione e Aggregazione**
+Trattandosi di una metrica deterministica, non è necessaria un'aggregazione oraria per il calcolo del valore. Ogni singolo flusso TLS originato dall'host verso Internet viene controllato in tempo reale. Lo script Python agisce come un filtro passante: se `tls.sni` è nullo o assente, l'evento viene marcato come critico.
+
+**4. Architettura del Rilevamento (Real-time)**
+A differenza delle metriche statistiche, $M_{sni}$ non richiede InfluxDB per la baseline, poiché non esiste un "livello normale" di evasione SNI tollerabile. Il sistema opera in modalità **Zero-Tolerance**: il rilevamento di un singolo pacchetto privo di SNI attiva istantaneamente il punteggio di penalità nel database di stato dell'host.
+
+**5. Calcolo della Metrica (Output)**
+Il verdetto è binario e immediato:
+* Se viene rilevato almeno un flusso TLS privo di estensione SNI nell'intervallo di monitoraggio: **$M_{sni} = 1$**.
+* In presenza di traffico TLS standard e correttamente configurato: **$M_{sni} = 0$**.
+
+---
+
 ## 2. Implementazione delle Metriche Statistiche e Comportamentali (Batch 1 Ora)
 
 ### 2.1 Metrica: Rilevamento Funzionalità Server ($M_{srv}$)
@@ -355,3 +376,46 @@ $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
 L'attivazione dipende dall'eccezionalità della persistenza:
 * Se la durata massima registrata sfora in modo eccezionale i parametri storici ($Z_{robusto} > 3$) **E** risulta superiore alla persistenza mediana dell'utente ($x_t > \tilde{x}$), si sospetta fortemente un tunnel persistente abusivo: **$M_{dur} = 1$**.
 * Se tutte le connessioni dell'ora rientrano nei normali tempi di chiusura dell'utente ($Z_{robusto} \le 3$), il comportamento è tollerato: **$M_{dur} = 0$**.
+
+### 2.10 Metrica: Tempesta ARP e Ricognizione L2 ($M_{arp}$)
+
+**1. Obiettivo Operativo**
+Rilevare fasi di movimento laterale o scansioni di rete locale effettuate da Ransomware o Worm. Prima di attaccare, questi malware devono mappare la sottorete a Livello 2 per trovare altri target. Questo genera una "tempesta" di richieste ARP (Address Resolution Protocol) che devia drasticamente dal comportamento di un PC che contatta solo il gateway o pochi server noti.
+
+**2. Acquisizione del Dato (Eventi ARP)**
+Suricata può essere configurato per loggare gli eventi di Livello 2. La metrica monitora i log di tipo `arp`, estraendo la marca temporale e l'indirizzo MAC sorgente. Ogni richiesta `"who-has"` generata dall'host viene contata come un'unità di attività esplorativa L2.
+
+**3. Logica di Estrazione e Aggregazione**
+Alla chiusura del batch orario, lo script somma tutte le richieste ARP generate dall'host monitorato, ottenendo il valore $A_t$ (attività ARP oraria). 
+
+*Nota (Broadcast vs Unicast):* Per aumentare la precisione, lo script filtra solo le richieste ARP dirette a indirizzi IP mai contattati in precedenza o le richieste *broadcast* massive, escludendo il normale traffico di mantenimento verso il router aziendale (Gateway).
+
+**4. Architettura del Rilevamento (Serie Storiche)**
+1. **Storico InfluxDB:** Il valore $A_t$ viene salvato nel database. Si recupera la serie storica degli ultimi 7 giorni per definire la "loquacità L2" tipica dell'host.
+2. **Baseline Robusta:** Si calcolano Mediana e MAD. Questo permette di ignorare piccoli picchi (es. accensione di una nuova stampante di rete) e focalizzarsi su scansioni sistematiche di centinaia di indirizzi.
+
+**5. Calcolo della Metrica (Output)**
+Si calcola lo Z-Score robusto sulla frequenza ARP:
+$$Z = \frac{|A_t - \text{Mediana}|}{MAD}$$
+* Se $Z > 3$, indicando una scansione aggressiva della sottorete locale: **$M_{arp} = 1$**.
+* Se l'attività ARP è in linea con il rumore di fondo della rete: **$M_{arp} = 0$**.
+
+### 2.11 Metrica: Latenza RTT e Routing Anomalo ($M_{rtt}$)
+
+**1. Obiettivo Operativo**
+Identificare l'esfiltrazione di dati o il controllo remoto tramite canali che utilizzano tecniche di anonimizzazione (Tor, VPN non autorizzate) o server situati in aree geografiche sospette (Asia, Est Europa). Poiché la velocità della luce e i ritardi di routing sono vincoli fisici, una comunicazione che "rimbalza" attraverso nodi di anonimato presenterà una latenza (RTT) drasticamente superiore alla norma.
+
+**2. Acquisizione del Dato (TCP RTT)**
+Suricata misura il tempo intercorso tra l'invio del pacchetto `SYN` e la ricezione del `SYN-ACK` durante l'apertura delle connessioni TCP. Questo dato viene registrato nel campo `tcp.rtt` (espresso in microsecondi).
+
+**3. Logica di Estrazione e Aggregazione**
+Lo script Python estrae tutti i valori di RTT dei flussi verso l'esterno nell'ora corrente. Per evitare che un singolo server lento distorca il risultato, non si usa la media, ma si calcola la **Mediana della latenza oraria ($L$)**. Questo valore rappresenta il "ritardo medio di instradamento" dell'host verso Internet in quel batch temporale.
+
+**4. Architettura del Rilevamento (Fisica della Rete)**
+Il valore $L$ viene confrontato con la mediana storica $M$ salvata in InfluxDB. 
+*Nota (Deterioramento Direzionale):* Un calo della latenza (connessione più veloce) non è mai considerato un rischio. Il sistema è programmato per attivarsi solo in caso di *incremento* della latenza, sintomo di un instradamento più lungo e complesso (es. tunnel Tor).
+
+**5. Calcolo della Metrica (Output)**
+$$Z = \frac{|L - M|}{MAD}$$
+* Se $Z > 3$ e contemporaneamente $L > M$ (latenza significativamente aumentata): **$M_{rtt} = 1$**.
+* Se la latenza rimane stabile o subisce variazioni trascurabili: **$M_{rtt} = 0$**.
