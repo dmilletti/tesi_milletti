@@ -1,8 +1,8 @@
-# Guida all'Implementazione delle Metriche
+# 1 Guida all'Implementazione delle Metriche
 
-## 1. Implementazione delle Metriche Deterministiche
+## 1.A Implementazione delle Metriche Deterministiche
 
-### 1.1 Metrica: Reputazione Destinazione ($M_{rep}$)
+### Metrica 1: Reputazione Destinazione ($M_{rep}$)
 
 **1. Obiettivo Operativo**  
 Verificare in tempo reale se l'host monitorato genera traffico verso indirizzi IP o nomi a dominio compromessi (es. server *Command & Control*, domini di phishing, nodi Tor o *malware drop sites*). L'identificazione di un singolo evento di questo tipo è sufficiente per attivare la penalità massima di $M_{rep}$.
@@ -32,7 +32,7 @@ La metrica $M_{rep}$ si attiva secondo una rigida valutazione booleana:
 * Se la funzione di look-up locale rileva una o più corrispondenze (MATCH $\ge$ 1), l'anomalia è confermata. Il sistema assegna la penalità: **$M_{rep} = 1$**.
 * Se, al contrario, non emergono riscontri nei database di reputazione, la connessione si considera sicura: **$M_{rep} = 0$**.
 
-### 1.2 Metrica: Fingerprinting Crittografico (JA4) - $M_{ja4}$
+### Metrica 2: Fingerprinting Crittografico (JA4) - $M_{ja4}$
 
 **1. Obiettivo Operativo**  
 Identificare in modo deterministico applicazioni malevole, malware o strumenti di *penetration testing* (es. Metasploit, Cobalt Strike, script Python/Go malevoli) analizzando il modo in cui negoziano la connessione crittografata (TLS *Client Hello*), indipendentemente dall'IP di destinazione. Questa tecnica supera i limiti delle *blacklist* basate solo su IP/Domini, intercettando gli attaccanti anche quando cambiano dinamicamente l'infrastruttura (tecniche di *Fast-Flux*).
@@ -60,7 +60,7 @@ Il rilevamento avviene secondo una rigida logica booleana:
 * Se il look-up locale rileva una corrispondenza tra un JA4 generato dall'host e un JA4 malevolo noto (con eventuale fallimento della validazione SNI), la compromissione è confermata. Il sistema assegna la penalità massima: **$M_{ja4} = 1$**.
 * Se il fingerprint appartiene a software noto e benigno (es. browser standard), o non è presente nelle *blacklist*, il valore è nullo: **$M_{ja4} = 0$**.
 
-### 1.3 Metrica: Anomalie nei Certificati TLS ($M_{cert}$)
+### Metrica 3: Anomalie nei Certificati TLS ($M_{cert}$)
 
 **1. Obiettivo Operativo**  
 Identificare connessioni verso server che presentano certificati crittografici X.509 anomali, come certificati scaduti, non ancora validi o auto-firmati (*Self-Signed*). Poiché le infrastrutture d'attacco improvvisate, i server *Command & Control* o i malware tendono a non acquistare certificati legittimi da Autorità di Certificazione (CA) riconosciute, l'uso di un certificato anomalo è un forte indicatore di compromissione o di *Man-in-the-Middle*.
@@ -86,7 +86,7 @@ L'esito dei controlli formali determina l'attivazione della penalità in modo bo
 * Se si verifica **almeno una** delle condizioni di anomalia (il certificato è auto-firmato OPPURE risulta scaduto/non valido temporalmente), il canale di comunicazione è ritenuto inaffidabile. Il sistema assegna la penalità: **$M_{cert} = 1$**.
 * Se il certificato è stato emesso da terzi e risulta in corso di validità, il traffico è considerato regolare: **$M_{cert} = 0$**.
 
-### 1.4 Metrica: Evasione SNI nel Traffico Cifrato ($M_{sni}$)
+### Metrica 4: Evasione SNI nel Traffico Cifrato ($M_{sni}$)
 
 **1. Obiettivo Operativo**
 Identificare l'uso di software di rete non standard, script malevoli o tentativi di connessione diretta ad indirizzi IP che omettono l'estensione SNI (*Server Name Indication*). Poiché ogni browser moderno e applicazione legittima specifica il nome del dominio per negoziare il certificato corretto, l'assenza di tale campo è un segnale inequivocabile di traffico generato da strumenti custom o malware che tentano di evadere i controlli basati su DNS.
@@ -107,9 +107,9 @@ Il verdetto è binario e immediato:
 
 ---
 
-## 2. Implementazione delle Metriche Statistiche e Comportamentali (Batch 1 Ora)
+## 1.B Implementazione delle Metriche Statistiche e Comportamentali (Batch 1 Ora)
 
-### 2.1 Metrica: Rilevamento Funzionalità Server ($M_{srv}$)
+### Metrica 5: Rilevamento Funzionalità Server ($M_{srv}$)
 
 **1. Obiettivo Operativo**  
 Rilevare l'inversione di ruolo dell'host monitorato all'interno della rete. Una *workstation* aziendale deve operare esclusivamente come "Client" (iniziando le connessioni). Se l'host inizia ad accettare connessioni in ingresso agendo da "Server", il sistema deve segnalare immediatamente il sospetto di una *backdoor* attiva, di un accesso remoto non autorizzato (es. RDP abusivo) o di un tentativo di movimento laterale da parte di un attaccante.
@@ -134,7 +134,7 @@ Essendo una regola comportamentale inderogabile, l'output rimane booleano e vien
 * Se l'algoritmo trova **almeno un flusso** (MATCH $\ge$ 1) in cui l'host monitorato ha agito da server stabilendo la connessione, l'inversione di ruolo è confermata: **$M_{srv} = 1$**.
 * Se in tutti i flussi analizzati l'host compare unicamente come `"src_ip"` (o se compare come `"dest_ip"` ma la connessione è stata rifiutata/bloccata), il comportamento è conforme: **$M_{srv} = 0$**.
 
-### 2.2 Metrica: Protocollo su Porta Non Standard ($M_{proto}$)
+### Metrica 6: Protocollo su Porta Non Standard ($M_{proto}$)
 
 **1. Obiettivo Operativo**  
 Rilevare in modo esplicito i tentativi di evasione del firewall aziendale o l'occultamento del traffico (mascheramento). L'obiettivo è identificare se l'host monitorato sta trasmettendo dati utilizzando un protocollo applicativo di Livello 7 (es. SSH, RDP, SMB) su una porta logica di Livello 4 (es. porta 80 o 443) che non corrisponde allo standard assegnato dall'ente IANA.
@@ -161,7 +161,7 @@ L'esito del controllo logico genera il valore booleano di fine batch:
 * Se per l'host viene rilevato **almeno un flusso** in cui il protocollo applicativo differisce da quello atteso dalla mappa standard (es. `dest_port: 443` ma `app_proto: ssh`), l'occultamento è certificato. Il sistema attiva l'anomalia: **$M_{proto} = 1$**.
 * Se tutto il traffico analizzato nell'ora rispetta la coerenza Porta/Protocollo, il valore rimane nullo: **$M_{proto} = 0$**.
 
-### 2.3 Metrica: Scansione Interna o Fan-out ($M_{scan}$)
+### Metrica 7: Scansione Interna o Fan-out ($M_{scan}$)
 
 **1. Obiettivo Operativo**  
 Rilevare un improvviso e anomalo allargamento del raggio d'azione dell'host all'interno della rete aziendale. Se una postazione infetta tenta di propagare un *malware* (Movimento Laterale) o cerca server vulnerabili (*Network Discovery*), inizierà a contattare a tappeto decine o centinaia di IP interni. L'obiettivo è misurare l'eccezionalità statistica di questo "Fan-out" (numero di destinazioni uniche) rispetto alle normali abitudini del dipendente.
@@ -198,7 +198,7 @@ L'output della metrica si determina valutando il superamento della soglia:
 * Se il "Fan-out" orario genera uno $Z_{robusto} > 3$ (comportamento con probabilità $\le 0.3\%$ di essere casuale), il picco di scansione è confermato: **$M_{scan} = 1$**.
 * Se lo scostamento rientra nelle normali fluttuazioni storiche ($Z_{robusto} \le 3$), il comportamento volumetrico è tollerato: **$M_{scan} = 0$**.
 
-### 2.4 Metrica: Esplorazione di Protocolli Inediti ($M_{new}$)
+### Metrica 8: Esplorazione di Protocolli Inediti ($M_{new}$)
 
 **1. Obiettivo Operativo**  
 Rilevare l'impiego di un protocollo applicativo di Livello 7 mai utilizzato in precedenza dall'host. Poiché ogni postazione aziendale possiede una "firma comportamentale" limitata e ripetitiva (es. traffico HTTP/TLS, DNS, protocolli di posta o gestionali interni), la comparsa improvvisa di protocolli anomali (es. nodi *Peer-to-Peer* per esfiltrazione, *routing* Tor, o SSH/RDP su macchine non amministrative) è un indicatore primario dell'esecuzione di un *payload* malevolo.
@@ -222,7 +222,7 @@ Superato il periodo di *Cold Start*, il rilevamento segue una ferrea logica insi
 * Se la differenza tra gli insiemi **non è vuota** ($P_{batch} \setminus P_{storico} \neq \emptyset$), significa che è comparso almeno un protocollo totalmente inedito per la storicità del nodo. L'anomalia comportamentale è certificata e si impone la penalità: **$M_{new} = 1$**.
 * Se l'insieme differenza è vuoto (ovvero i protocolli usati nell'ultima ora sono un sottoinsieme di quelli già noti storicamente), il comportamento è considerato consuetudinario: **$M_{new} = 0$**.
 
-### 2.5 Metrica: Asimmetria Volumetrica in Uscita ($M_{vol}$)
+### Metrica 9: Asimmetria Volumetrica in Uscita ($M_{vol}$)
 
 **1. Obiettivo Operativo**  
 Rilevare un trasferimento massivo di dati dalla postazione verso l'esterno. Nella normale operatività quotidiana, il traffico di un utente standard è fortemente asimmetrico verso il *download* (scaricamento di pagine web, video, documenti). Un'inversione improvvisa di questa tendenza, caratterizzata da un picco eccezionale di dati in *upload* verso Internet, è un forte indicatore di esfiltrazione di dati aziendali o dell'invio di archivi compressi verso un server "Drop point" controllato dagli attaccanti.
@@ -252,7 +252,7 @@ Il verdetto finale viene stabilito dalla soglia statistica:
 * Se il picco di trasferimento genera uno scostamento $Z_{robusto} > 3$ (comportamento anomalo con probabilità $\le 0.3\%$), l'esfiltrazione anomala è confermata: **$M_{vol} = 1$**.
 * Se il volume di dati rientra nella naturale flessibilità del traffico dell'utente (es. l'invio di un allegato email leggermente più grande del solito, con $Z_{robusto} \le 3$), la metrica rimane passiva: **$M_{vol} = 0$**.
 
-### 2.6 Metrica: Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)
+### Metrica 10: Anomalie nel Protocollo di Risoluzione Nomi ($M_{dns}$)
 
 **1. Obiettivo Operativo**  
 Identificare la presenza di *malware* avanzati (es. *Ransomware* o *Botnet*) che utilizzano algoritmi DGA per generare dinamicamente i domini di Comando e Controllo, oppure rilevare tentativi di esfiltrazione dati tramite *DNS Tunneling*. Poiché la risoluzione dei nomi non viene quasi mai bloccata dai firewall aziendali, gli attaccanti incapsulano dati o comandi all'interno di query DNS composte da stringhe lunghissime e pseudo-casuali (es. `x9k2js8fq1...malicious.com`). L'obiettivo è misurare matematicamente questo "livello di disordine" testuale, che risulta impossibile da produrre durante la normale navigazione umana.
@@ -285,7 +285,7 @@ La deviazione dalla normalità determina l'esito:
 * Se il livello medio di disordine testuale genera uno $Z_{robusto} > 3$ (comportamento anomalo con probabilità $\le 0.3\%$), si certifica un abuso del protocollo di risoluzione nomi: **$M_{dns} = 1$**.
 * Se l'entropia aggregata rientra nei parametri storici tollerati ($Z_{robusto} \le 3$), indicando domini leggibili e strutturalmente prevedibili, la metrica rimane dormiente: **$M_{dns} = 0$**.
 
-### 2.7 Metrica: Rigidità Temporale e Automazione ($M_{time}$)
+### Metrica 11: Rigidità Temporale e Automazione ($M_{time}$)
 
 **1. Obiettivo Operativo**  
 Rilevare la presenza di comunicazioni automatizzate tra la postazione e server esterni. I malware (come botnet o *Remote Access Trojan*) mantengono la connessione attiva con il server di Comando e Controllo (C2) inviando pacchetti a intervalli regolari (effetto *beaconing* o battito cardiaco). L'obiettivo è misurare la varianza temporale tra le connessioni: un crollo vertiginoso della varianza indica che a generare il traffico non è la caotica navigazione umana, ma un rigido algoritmo informatico.
@@ -317,7 +317,7 @@ Pertanto, la metrica si attiva solo se si verificano **due condizioni simultanee
 * Se lo scostamento è eccezionale ($Z_{robusto} > 3$) **E** contestualmente la varianza attuale è sensibilmente inferiore alla varianza storica ($V_{batch} \ll \tilde{V}$), si certifica la presenza di un automatismo informatico: **$M_{time} = 1$**.
 * Se lo scostamento rientra nella norma ($Z_{robusto} \le 3$) oppure la varianza è aumentata (traffico più irregolare e "umano"), l'allarme non si attiva: **$M_{time} = 0$**.
 
-### 2.8 Metrica: Tasso di Connessioni Fallite ($M_{fail}$)
+### Metrica 12: Tasso di Connessioni Fallite ($M_{fail}$)
 
 **1. Obiettivo Operativo**  
 Individuare tentativi di *stealth scanning* (ricognizione della rete interna) o la disperata ricerca di un server di Comando e Controllo (C2) di riserva tramite algoritmi DGA. Poiché un malware procede "alla cieca", genererà inevitabilmente una vasta percentuale di connessioni rifiutate o andate in *timeout*. L'obiettivo è monitorare la stabilità della navigazione dell'utente e sanzionare crolli improvvisi di affidabilità dell'instradamento.
@@ -349,7 +349,7 @@ Essendo interessati solo a un *peggioramento* della stabilità, l'allarme richie
 * Se il tasso di fallimento orario subisce un incremento statisticamente eccezionale ($Z_{robusto} > 3$) **E** risulta superiore alla mediana storica ($r_t > \tilde{r}$), l'anomalia esplorativa è certificata: **$M_{fail} = 1$**.
 * Se il tasso di errore è nella norma ($Z_{robusto} \le 3$) o inferiore al solito, la metrica resta inattiva: **$M_{fail} = 0$**.
 
-### 2.9 Metrica: Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)
+### Metrica 13: Anomalie di Durata della Sessione / Reverse Shell ($M_{dur}$)
 
 **1. Obiettivo Operativo**  
 Intercettare l'istituzione di *Reverse Shell* interattive, tunnel VPN non autorizzati o canali di esfiltrazione lenti e continui (*Low and Slow*). A differenza della normale navigazione web, che è caratterizzata da raffiche brevi e interrotte, una connessione di controllo remoto richiede di mantenere la sessione TCP stabilita e aperta per ore intere, sfidando i normali pattern temporali dell'utente.
@@ -377,7 +377,7 @@ L'attivazione dipende dall'eccezionalità della persistenza:
 * Se la durata massima registrata sfora in modo eccezionale i parametri storici ($Z_{robusto} > 3$) **E** risulta superiore alla persistenza mediana dell'utente ($x_t > \tilde{x}$), si sospetta fortemente un tunnel persistente abusivo: **$M_{dur} = 1$**.
 * Se tutte le connessioni dell'ora rientrano nei normali tempi di chiusura dell'utente ($Z_{robusto} \le 3$), il comportamento è tollerato: **$M_{dur} = 0$**.
 
-### 2.10 Metrica: Tempesta ARP e Ricognizione L2 ($M_{arp}$)
+### Metrica 14: Tempesta ARP e Ricognizione L2 ($M_{arp}$)
 
 **1. Obiettivo Operativo**
 Rilevare fasi di movimento laterale o scansioni di rete locale effettuate da Ransomware o Worm. Prima di attaccare, questi malware devono mappare la sottorete a Livello 2 per trovare altri target. Questo genera una "tempesta" di richieste ARP (Address Resolution Protocol) che devia drasticamente dal comportamento di un PC che contatta solo il gateway o pochi server noti.
@@ -400,7 +400,7 @@ $$Z = \frac{|A_t - \text{Mediana}|}{MAD}$$
 * Se $Z > 3$, indicando una scansione aggressiva della sottorete locale: **$M_{arp} = 1$**.
 * Se l'attività ARP è in linea con il rumore di fondo della rete: **$M_{arp} = 0$**.
 
-### 2.11 Metrica: Latenza RTT e Routing Anomalo ($M_{rtt}$)
+### Metrica 15: Latenza RTT e Routing Anomalo ($M_{rtt}$)
 
 **1. Obiettivo Operativo**
 Identificare l'esfiltrazione di dati o il controllo remoto tramite canali che utilizzano tecniche di anonimizzazione (Tor, VPN non autorizzate) o server situati in aree geografiche sospette (Asia, Est Europa). Poiché la velocità della luce e i ritardi di routing sono vincoli fisici, una comunicazione che "rimbalza" attraverso nodi di anonimato presenterà una latenza (RTT) drasticamente superiore alla norma.
