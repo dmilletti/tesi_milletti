@@ -285,37 +285,38 @@ La deviazione dalla normalità determina l'esito:
 * Se il livello medio di disordine testuale genera uno $Z_{robusto} > 3$ (comportamento anomalo con probabilità $\le 0.3\%$), si certifica un abuso del protocollo di risoluzione nomi: **$M_{dns} = 1$**.
 * Se l'entropia aggregata rientra nei parametri storici tollerati ($Z_{robusto} \le 3$), indicando domini leggibili e strutturalmente prevedibili, la metrica rimane dormiente: **$M_{dns} = 0$**.
 
-### Metrica 11: Rigidità Temporale e Automazione ($M_{time}$)
+### Metrica 11: Unidirectional Flow ($M_{uni}$)
 
 **1. Obiettivo Operativo**  
-Rilevare la presenza di comunicazioni automatizzate tra la postazione e server esterni. I malware (come botnet o *Remote Access Trojan*) mantengono la connessione attiva con il server di Comando e Controllo (C2) inviando pacchetti a intervalli regolari (effetto *beaconing* o battito cardiaco). L'obiettivo è misurare la varianza temporale tra le connessioni: un crollo vertiginoso della varianza indica che a generare il traffico non è la caotica navigazione umana, ma un rigido algoritmo informatico.
+Individuare la presenza di traffico TCP strutturalmente sbilanciato o "monco". Poiché il protocollo TCP richiede l'invio costante di pacchetti di conferma (ACK), la totale assenza di traffico di ritorno è un'anomalia fisica severa. L'obiettivo è intercettare l'host monitorato qualora stia generando attacchi DOS (es. *SYN Flood*), effettuando scansioni cieche (*blind stealth scan*), o comunicando tramite indirizzi IP contraffatti (*IP Spoofing*) che gli impediscono di ricevere le risposte del server target.
 
-**2. Acquisizione del Dato (Timestamp di Suricata)**  
-L'analisi temporale sfrutta nuovamente i log di flusso di Suricata (`event_type: flow`). Per questa metrica, il dato cruciale non è la porta o il volume, ma la precisa marca temporale di inizio della connessione. Il NIDS registra questo dato nel campo `"timestamp"` di ogni flusso in formato ISO 8601 (o direttamente in UNIX Epoch se configurato), garantendo una precisione al microsecondo.
+**2. Acquisizione del Dato (Contatori Volumetrici di Suricata)**  
+L'analisi si basa sui log riassuntivi delle connessioni generati da Suricata. Il motore NIDS compila il file `eve.json` inserendovi eventi con `event_type` pari a `flow`. Per questa metrica, la *Deep Packet Inspection* non è necessaria: il sistema si concentra unicamente sui contatori direzionali dei pacchetti inseriti nativamente da Suricata nel log, in particolare i campi `"flow" -> "packets_toserver"` (pacchetti inviati dall'host) e `"flow" -> "packets_toclient"` (pacchetti ricevuti dall'esterno).
 
 **3. Logica di Estrazione e Aggregazione**  
-Al termine della finestra oraria, lo script Python analizzerà i flussi in cui l'host è *Originator* (`"src_ip"`) diretti verso Internet (`"dest_ip"` pubblico). L'elaborazione matematica procede per step:
-1.  **Ordinamento Cronologico:** Si estraggono tutti i `"timestamp"` di inizio flusso e si ordinano dal più vecchio al più recente.
-2.  **Calcolo dell'Inter-arrivo:** Lo script calcola il delta temporale ($\Delta t_i = t_{i} - t_{i-1}$) tra ogni connessione e la precedente.
-3.  **Calcolo della Varianza:** Sull'array dei delta ($\Delta t_1, \Delta t_2, \dots, \Delta t_n$) viene calcolata la varianza statistica, ottenendo il valore aggregato orario $V_{batch}$.
+Alla chiusura del batch orario, lo script Python filtra tutti i flussi TCP in cui l'host monitorato ha il ruolo di *Originator* (`"src_ip"`). L'elaborazione procede al calcolo di due variabili globali orarie:
+1.  **Totale Flussi ($F_{tot}$):** Il conteggio complessivo di tutti i flussi TCP validi avviati nell'ora.
+2.  **Flussi Unidirezionali ($F_{uni}$):** Il conteggio del sottoinsieme di flussi in cui il valore del campo `"packets_toclient"` è esattamente pari a $0$.
 
-*Nota (Formattazione Temporale):* Per garantire precisione ed evitare bug legati ai fusi orari (Timezone) o all'ora legale (DST), lo script Python dovrà convertire immediatamente tutti i timestamp testuali in formati interi (UNIX Timestamp in millisecondi) prima di eseguire qualsiasi sottrazione algebrica.
+Lo script calcola quindi il tasso orario di unidirezionalità: $u_t = \frac{|F_{uni}|}{|F_{tot}|}$.
 
-**4. Architettura del Rilevamento (Serie Storiche con InfluxDB)**  
-Anche l'analisi temporale si appoggia all'infrastruttura InfluxDB per gestire la *baseline*:
-1. **Storicità della Varianza:** Il valore $V_{batch}$ viene scritto nel TSDB, e lo script recupera l'array delle varianze orarie degli ultimi 7 giorni.
-2. **Parametri Robusti:** Si calcolano la Mediana ($\tilde{V}$) e la dispersione assoluta ($MAD$) sulla *baseline* storica.
-3. **Gestione del Golden Profile:** Per prevenire il *Baseline Poisoning*, il *Golden Profile* di un nuovo host viene inizializzato con varianze temporali pre-impostate volutamente **molto alte**. Questo simula il profilo irregolare di un operatore umano. Se il nuovo PC è già infetto e inizia a "battere" con regolarità algoritmica, la sua varianza reale risulterà drasticamente più bassa rispetto a quella del profilo assegnato, facendo scattare subito la trappola.
+*Nota (Filtro di Soglia Minima):* Per evitare che una singola connessione fallita in un'ora di scarsa attività generi un allarme artificiale del 100%, lo script applicherà una soglia di sbarramento (es. $|F_{tot}| > 50$). Se l'host ha generato un numero di connessioni insignificante, il calcolo della metrica viene bypassato, restituendo $0$.
+
+**4. Architettura del Rilevamento (Serie Storiche con InfluxDB e Clamp)**  
+L'architettura sfrutta il *Time-Series Database* **InfluxDB** per gestire il profilo comportamentale:
+1.  **Memorizzazione Storica:** Il tasso orario $u_t$ viene salvato nel database.
+2.  **Parametri Robusti:** Lo script interroga InfluxDB per estrarre l'array dei tassi di unidirezionalità degli ultimi 7 giorni, calcolando la Mediana ($\tilde{u}$) e la dispersione assoluta ($MAD$).
+3.  **Gestione del Clamp Matematico:** Poiché il traffico TCP legittimo è altamente affidabile, è matematicamente probabile che per intere giornate l'host registri zero flussi unidirezionali, portando la $MAD$ a $0$. Per prevenire errori critici di divisione per zero nel calcolo dello Z-Score, l'algoritmo forzerà un "valore di clamp" per la dispersione (es. $\max(MAD, 0.01)$ ), garantendo la stabilità dell'esecuzione algoritmica.
+4.  **Golden Profile:** Per prevenire il *Baseline Poisoning*, il *Golden Profile* di un nuovo host viene pre-compilato in InfluxDB con un tasso di unidirezionalità pari allo $0\%$. Questo rende il sistema immediatamente ostile verso le asimmetrie TCP fin dal primo avvio.
 
 **5. Calcolo della Metrica (Output)**  
-Lo script calcola lo scostamento statistico standardizzato:
+Il motore Python procede al calcolo dello scostamento statistico standardizzato:
 
-$$Z_{robusto} = \frac{|V_{batch} - \tilde{V}|}{MAD}$$
+$$Z_{robusto} = \frac{|u_t - \tilde{u}|}{MAD}$$
 
-A differenza delle altre metriche, in questo caso l'anomalia è unidirezionale: siamo preoccupati solo se il comportamento diventa **più rigido** (minore varianza), non se diventa più caotico.
-Pertanto, la metrica si attiva solo se si verificano **due condizioni simultanee**:
-* Se lo scostamento è eccezionale ($Z_{robusto} > 3$) **E** contestualmente la varianza attuale è sensibilmente inferiore alla varianza storica ($V_{batch} \ll \tilde{V}$), si certifica la presenza di un automatismo informatico: **$M_{time} = 1$**.
-* Se lo scostamento rientra nella norma ($Z_{robusto} \le 3$) oppure la varianza è aumentata (traffico più irregolare e "umano"), l'allarme non si attiva: **$M_{time} = 0$**.
+La metrica si attiva esclusivamente in caso di un peggioramento evidente dell'affidabilità bidirezionale:
+* Se il tasso di flussi privi di riscontro genera uno scostamento eccezionale ($Z_{robusto} > 3$) **E** contestualmente risulta superiore alla mediana storica ($u_t > \tilde{u}$), l'anomalia fisica di trasporto è certificata: **$M_{uni} = 1$**.
+* Se l'asimmetria rientra nelle ristrette tolleranze storiche ($Z_{robusto} \le 3$), indicando normali *timeout* di rete, la metrica rimane dormiente: **$M_{uni} = 0$**.
 
 ### Metrica 12: Connection Failure Rate ($M_{fail}$)
 
