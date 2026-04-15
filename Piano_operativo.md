@@ -98,14 +98,19 @@ Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispett
 
     Se il livello di disordine delle stringhe genera uno scostamento incompatibile con le normali abitudini dell'host ($Z_{robusto} > 3$), si registra un abuso del protocollo e si fissa $M_{dns} = 1$.
 
-* **11. Rigidità Temporale e Automazione ($M_{time}$)**
-  * **Razionale Teorico:** I processi infetti (come le *botnet*) comunicano con i server esterni di Comando e Controllo (C2) utilizzando cicli algoritmici preimpostati. Questo genera comunicazioni periodiche estremamente precise (effetto *heartbeat* o battito cardiaco), in netto contrasto con l'elevata variabilità temporale che caratterizza la normale navigazione umana.
-  * **Implementazione Tecnica:** Il sistema analizza i *timestamp* di inizio dei flussi di rete verso destinazioni esterne (es. log NetFlow). Viene calcolato il tempo di inter-arrivo, ovvero l'intervallo temporale che trascorre tra la generazione di un flusso e il successivo. Alla fine del batch orario, si valuta la varianza di questi intervalli. Una varianza che crolla verso lo zero indica una forte automazione meccanica e innaturale.
-  * **Formalizzazione:** Sia $\Delta t_i$ il tempo trascorso tra l'inizio di un flusso di rete e il successivo. Sia $V_{batch}$ la varianza di questi intervalli temporali registrata nell'ora corrente per l'host $h$. Confrontandola con la Mediana storica $\tilde{V}$ e la $MAD$, si calcola lo scostamento:
+* **11. Unidirectional Flow ($M_{uni}$)**
+    * **Razionale Teorico:** Il protocollo TCP è progettato per essere intrinsecamente bidirezionale; anche in trasferimenti di dati massivi verso un'unica direzione, il ricevente deve trasmettere pacchetti di controllo (ACK) per validare la sessione. La comparsa di flussi "monchi", in cui il traffico viaggia esclusivamente verso l'esterno senza alcuna risposta, indica un'anomalia strutturale nella fisica della comunicazione. Tale comportamento astrae scenari critici come attacchi DOS (es. SYN Flood), tecniche di scansione "cieca" (*blind scanning*) o l'uso di indirizzi IP contraffatti (*spoofing*) che impediscono la ricezione del traffico di ritorno.
+    * **Implementazione Tecnica:** L'analisi valuta l'equilibrio dei flussi a livello di trasporto durante la finestra di osservazione. Alla chiusura del batch, il sistema calcola la quota di connessioni originate dall'host che non hanno registrato pacchetti in ricezione. Il valore viene confrontato con la baseline storica dell'host per distinguere tra sporadici disservizi di rete e un'attività asimmetrica sistematica.
+    * **Formalizzazione:** Sia $F_{tot}$ l'insieme dei flussi TCP originati dall'host $h$ nella finestra oraria $t$. Definiamo $F_{uni} \subseteq F_{tot}$ il sottoinsieme dei flussi privi di pacchetti in ricezione. Il tasso di unidirezionalità orario è definito come:
+ 
+        $$u_t = \frac{|F_{uni}|}{|F_{tot}|}$$
+      
+        Siano $\tilde{u}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* storiche (7 giorni). Lo scostamento statistico standardizzato è:
+      
+        $$Z_{robusto} = \frac{|u_t - \tilde{u}|}{MAD}$$
+      
+        Se lo scostamento è eccezionale ($Z_{robusto} > 3$) e il tasso attuale è superiore alla mediana storica ($u_t > \tilde{u}$), si certifica l'anomalia strutturale: $M_{uni} = 1$.
 
-    $$Z_{robusto} = \frac{|V_{batch} - \tilde{V}|}{MAD}$$
-
-    Se lo scostamento statistico è eccezionale ($Z_{robusto} > 3$) e, contestualmente, la varianza attuale è nettamente inferiore a quella storica (cioè $V_{batch} \ll \tilde{V}$, indicando un crollo della variabilità temporale), si certifica la presenza di un automatismo informatico e si impone $M_{time} = 1$.
 
 * **12. Connection Failure Rate ($M_{fail}$)**
   * **Razionale Teorico:** Nella normale operatività aziendale, la stragrande maggioranza dei tentativi di connessione (es. *handshake* TCP o richieste DNS) avviati da un client legittimo si conclude con successo. Al contrario, un software malevolo impegnato in attività di ricognizione silenziosa della rete interna (*stealth scanning*) o nella ricerca di un server di Comando e Controllo di riserva (tramite DGA), genererà inevitabilmente una vasta mole di tentativi di connessione a vuoto (esitanti in pacchetti *RST* o *Timeout*). Un'impennata improvvisa del tasso di fallimento astrae perfettamente questo comportamento anomalo di "ricerca alla cieca".
@@ -187,7 +192,7 @@ I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'ana
   * Asimmetria Volumetrica ($M_{vol}$)
 * **Segnali Deboli (+10 punti):** Anomalie che, prese singolarmente, non sono sufficienti per destare allarme, ma fungono da "moltiplicatori" per confermare altre minacce.
   * DNS Anomalies ($M_{dns}$)
-  * Automazione Temporale ($M_{time}$)
+  * Unidirectional Flow ($M_{uni}$)
 
 L'equazione finale per il calcolo dello *Score Globale* dell'host risulta matematicamente limitata a un valore massimo di 100 tramite la funzione minimo:
 
