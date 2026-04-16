@@ -4,7 +4,7 @@ Il presente documento traduce il modello logico-matematico in un piano di implem
 
 ## 1. Definizione Logica e Teorica delle Metriche di Sicurezza
 
-Il modello si compone di **dieci metriche indipendenti**, selezionate per coprire l'intero spettro delle anomalie di rete. Ciascuna metrica astrae uno specifico comportamento dell'host e lo traduce in un valore normalizzato $M_i \in \{0, 1\}$. Le metriche sono raggruppate in base all'approccio logico utilizzato per la loro valutazione.
+Il modello si compone di **15 metriche indipendenti**, selezionate per coprire l'intero spettro delle anomalie di rete. Ciascuna metrica astrae uno specifico comportamento dell'host e lo traduce in un valore normalizzato $M_i \in \{0, 1\}$. Le metriche sono raggruppate in base all'approccio logico utilizzato per la loro valutazione.
 
 ### 1.A Metriche Deterministiche (In tempo reale)
 Queste metriche operano secondo una logica booleana e non necessitano di un periodo di apprendimento. Valutano la natura intrinseca di una singola connessione confrontandola con insiemi di dati noti a priori.
@@ -291,16 +291,16 @@ A livello base della rete (Livello 2 o *Data Link*), questa esplorazione si trad
 
 ## 5. Riferimenti Bibliografici
 
-[1] M. A. Romo-Chavero, G. de los Ríos Alatorre, J. A. Cantoral-Ceballos, J. A. Pérez-Díaz, and C. Martinez-Cagnazzo, *"A Hybrid Model for BGP Anomaly Detection Using Median Absolute Deviation and Machine Learning"*, IEEE Open Journal of the Communications Society, vol. 6, 2025. [DOI: 10.1109/OJCOMS.2025.3550010](https://doi.org/10.1109/OJCOMS.2025.3550010)
+[1] M. A. Romo-Chavero, G. de los Ríos Alatorre, J. A. Cantoral-Ceballos, J. A. Pérez-Díaz, and C. Martinez-Cagnazzo, *"A Hybrid Model for BGP Anomaly Detection Using Median Absolute Deviation and Machine Learning"*, 2025. [DOI: 10.1109/OJCOMS.2025.3550010](https://doi.org/10.1109/OJCOMS.2025.3550010)
 
-[2] A. Talukder and A. Rahman, *"Evaluating the Efficacy of Explainable Machine Learning Algorithms for the Detection and Classification of Network Intrusions"*, 2025 IEEE 2nd International Conference on Computing, Applications and Systems (COMPAS), 2025. [DOI: 10.1109/COMPAS67506.2025.11381867](https://doi.org/10.1109/COMPAS67506.2025.11381867)
+[2] A. Talukder and A. Rahman, *"Evaluating the Efficacy of Explainable Machine Learning Algorithms for the Detection and Classification of Network Intrusions"*, 2025. [DOI: 10.1109/COMPAS67506.2025.11381867](https://doi.org/10.1109/COMPAS67506.2025.11381867)
 
-[3] K. Acharjya, M. Arora, M. Grover, and M. Eti, *"Application of Artificial Intelligence and Machine Learning Techniques for Network Intrusion Detection and Prevention"*, 2025 International Conference on Networks and Cryptology (NETCRYPT), 2025. [DOI: 10.1109/NETCRYPT65877.2025.11102769](https://doi.org/10.1109/NETCRYPT65877.2025.11102769)
+[3] K. Acharjya, M. Arora, M. Grover, and M. Eti, *"Application of Artificial Intelligence and Machine Learning Techniques for Network Intrusion Detection and Prevention"*, 2025. [DOI: 10.1109/NETCRYPT65877.2025.11102769](https://doi.org/10.1109/NETCRYPT65877.2025.11102769)
 
-[4] H. Muttaqien, M. Niswar, Z. Zainuddin, and S. Syarif, *"Efficient Identification of Malicious Traffic in TLS Networks Using Machine Learning"*, 2025 IEEE International Conference on Artificial Intelligence and Mechatronics Systems (AIMS), 2025. [DOI: 10.1109/AIMS66189.2025.11229622](https://doi.org/10.1109/AIMS66189.2025.11229622)
+[4] H. Muttaqien, M. Niswar, Z. Zainuddin, and S. Syarif, *"Efficient Identification of Malicious Traffic in TLS Networks Using Machine Learning"*, 2025. [DOI: 10.1109/AIMS66189.2025.11229622](https://doi.org/10.1109/AIMS66189.2025.11229622)
 
-[5] D. Shamsimukhametov, A. Kurapov, M. Liubogoshchev, and E. Khorov, *"Is Encrypted ClientHello a Challenge for Traffic Classification?"*, IEEE Access, vol. 10, pp. 77883-77897, 2022. [DOI: 10.1109/ACCESS.2022.3191431](https://doi.org/10.1109/ACCESS.2022.3191431)
+[5] D. Shamsimukhametov, A. Kurapov, M. Liubogoshchev, and E. Khorov, *"Is Encrypted ClientHello a Challenge for Traffic Classification?"*, 2022. [DOI: 10.1109/ACCESS.2022.3191431](https://doi.org/10.1109/ACCESS.2022.3191431)
 
-[6] S. Razaulla, C. Fachkha, C. Markarian, A. Gawanmeh, W. Mansoor, B. C. Fung, and C. Assi, *"The Age of Ransomware: A Survey on the Evolution, Taxonomy, and Research Directions"*, IEEE Access, vol. 11, pp. 40698-40723, 2023. [DOI: 10.1109/ACCESS.2023.3268535](https://doi.org/10.1109/ACCESS.2023.3268535)
+[6] S. Razaulla, C. Fachkha, C. Markarian, A. Gawanmeh, W. Mansoor, B. C. Fung, and C. Assi, *"The Age of Ransomware: A Survey on the Evolution, Taxonomy, and Research Directions"*, 2023. [DOI: 10.1109/ACCESS.2023.3268535](https://doi.org/10.1109/ACCESS.2023.3268535)
 
 ---
