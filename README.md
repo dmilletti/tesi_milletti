@@ -30,9 +30,9 @@ Queste metriche valutano eventi che si verificano in un determinato momento e so
 ## 3. Calcolo delle metriche comportamentali/statistiche (Analisi della "zona grigia")
 
 Le metriche comportamentali non cercano minacce note, ma esplorano la cosiddetta **"zona grigia"**: traffico apparentemente legittimo che risulta sospetto perché eccessivo, fuori orario, troppo rigido o totalmente inedito per quello specifico host. 
-Per valutare questa tipologia di anomalie, il modello utilizza due approcci matematici distinti.  
-Il primo metodo riguarda l'analisi dei **Scostamenti statistici**, si tratta di esaminare i cambiamenti nella quantità del traffico.  
-L'altro metodo è chiamato **Novelty detection** e serve ad individuare qualcosa di completamente nuovo.
+Per valutare questa tipologia di anomalie, il modello utilizza due approcci matematici distinti:
+* **Scostamenti statistici**: si tratta di esaminare i cambiamenti nella quantità del traffico.  
+* **Novelty detection**: il quale serve ad individuare qualcosa di completamente nuovo.
 
 ### Fase 3.1: Analisi del comportamento atteso
 Per le variabili continue come volume di byte, frequenza temporale delle connessioni, dobbiamo capire cosa è considerato normale per un host. Per farlo, prendiamo una finestra di 7 giorni e calcoliamo due indicatori importanti:
