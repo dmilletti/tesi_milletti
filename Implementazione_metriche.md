@@ -380,43 +380,48 @@ L'attivazione dipende dall'eccezionalità della persistenza:
 
 ### Metrica 14: ARP Storm ($M_{arp}$)
 
-**1. Obiettivo Operativo**
+**1. Obiettivo Operativo**  
 Rilevare fasi di movimento laterale o scansioni di rete locale effettuate da Ransomware o Worm. Prima di attaccare, questi malware devono mappare la sottorete a Livello 2 per trovare altri target. Questo genera una "tempesta" di richieste ARP (Address Resolution Protocol) che devia drasticamente dal comportamento di un PC che contatta solo il gateway o pochi server noti.
 
-**2. Acquisizione del Dato (Eventi ARP)**
+**2. Acquisizione del Dato (Eventi ARP)**  
 Suricata può essere configurato per loggare gli eventi di Livello 2. La metrica monitora i log di tipo `arp`, estraendo la marca temporale e l'indirizzo MAC sorgente. Ogni richiesta `"who-has"` generata dall'host viene contata come un'unità di attività esplorativa L2.
 
-**3. Logica di Estrazione e Aggregazione**
+**3. Logica di Estrazione e Aggregazione**  
 Alla chiusura del batch orario, lo script somma tutte le richieste ARP generate dall'host monitorato, ottenendo il valore $A_t$ (attività ARP oraria). 
 
 *Nota (Broadcast vs Unicast):* Per aumentare la precisione, lo script filtra solo le richieste ARP dirette a indirizzi IP mai contattati in precedenza o le richieste *broadcast* massive, escludendo il normale traffico di mantenimento verso il router aziendale (Gateway).
 
-**4. Architettura del Rilevamento (Serie Storiche)**
+**4. Architettura del Rilevamento (Serie Storiche)**  
 1. **Storico InfluxDB:** Il valore $A_t$ viene salvato nel database. Si recupera la serie storica degli ultimi 7 giorni per definire la "loquacità L2" tipica dell'host.
 2. **Baseline Robusta:** Si calcolano Mediana e MAD. Questo permette di ignorare piccoli picchi (es. accensione di una nuova stampante di rete) e focalizzarsi su scansioni sistematiche di centinaia di indirizzi.
 
-**5. Calcolo della Metrica (Output)**
+**5. Calcolo della Metrica (Output)**  
 Si calcola lo Z-Score robusto sulla frequenza ARP:
+
 $$Z = \frac{|A_t - \text{Mediana}|}{MAD}$$
+
 * Se $Z > 3$, indicando una scansione aggressiva della sottorete locale: **$M_{arp} = 1$**.
 * Se l'attività ARP è in linea con il rumore di fondo della rete: **$M_{arp} = 0$**.
 
 ### Metrica 15: RTT Latency / Hidden Routing ($M_{rtt}$)
 
-**1. Obiettivo Operativo**
+**1. Obiettivo Operativo**  
 Identificare l'esfiltrazione di dati o il controllo remoto tramite canali che utilizzano tecniche di anonimizzazione (Tor, VPN non autorizzate) o server situati in aree geografiche sospette (Asia, Est Europa). Poiché la velocità della luce e i ritardi di routing sono vincoli fisici, una comunicazione che "rimbalza" attraverso nodi di anonimato presenterà una latenza (RTT) drasticamente superiore alla norma.
 
-**2. Acquisizione del Dato (TCP RTT)**
+**2. Acquisizione del Dato (TCP RTT)**  
 Suricata misura il tempo intercorso tra l'invio del pacchetto `SYN` e la ricezione del `SYN-ACK` durante l'apertura delle connessioni TCP. Questo dato viene registrato nel campo `tcp.rtt` (espresso in microsecondi).
 
-**3. Logica di Estrazione e Aggregazione**
+**3. Logica di Estrazione e Aggregazione**  
 Lo script Python estrae tutti i valori di RTT dei flussi verso l'esterno nell'ora corrente. Per evitare che un singolo server lento distorca il risultato, non si usa la media, ma si calcola la **Mediana della latenza oraria ($L$)**. Questo valore rappresenta il "ritardo medio di instradamento" dell'host verso Internet in quel batch temporale.
 
-**4. Architettura del Rilevamento (Fisica della Rete)**
-Il valore $L$ viene confrontato con la mediana storica $M$ salvata in InfluxDB. 
+**4. Architettura del Rilevamento (Fisica della Rete)**  
+Il valore $L$ viene confrontato con la mediana storica $M$ salvata in InfluxDB.
+
 *Nota (Deterioramento Direzionale):* Un calo della latenza (connessione più veloce) non è mai considerato un rischio. Il sistema è programmato per attivarsi solo in caso di *incremento* della latenza, sintomo di un instradamento più lungo e complesso (es. tunnel Tor).
 
-**5. Calcolo della Metrica (Output)**
+**5. Calcolo della Metrica (Output)**  
+
 $$Z = \frac{|L - M|}{MAD}$$
+
 * Se $Z > 3$ e contemporaneamente $L > M$ (latenza significativamente aumentata): **$M_{rtt} = 1$**.
 * Se la latenza rimane stabile o subisce variazioni trascurabili: **$M_{rtt} = 0$**.
