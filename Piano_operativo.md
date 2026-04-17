@@ -1,49 +1,47 @@
-# Piano Operativo e Specifica delle Metriche
+# Piano operativo e specifica delle metriche
 
-Il presente documento traduce il modello logico-matematico in un piano di implementazione pratico. Per evitare un carico computazionale insostenibile e per permettere un'analisi statistica affidabile, il sistema adotta un approccio ibrido: elaborazione a **finestre temporali (batch orari)** per i comportamenti statistici ed elaborazione **guidata dagli eventi (event-driven)** per i controlli deterministici.
+Questo documento traduce il modello teorico in un piano operativo e concreto. Per evitare di sovraccaricare il sistema con calcoli continui e garantire risultati precisi, adottiamo un approccio "ibrido" che struttura l'analisi su due livelli distinti:
+* **Analisi in tempo reale (Event-driven):** dedicata ai controlli deterministici, interviene istantaneamente non appena viene rilevato un segnale di pericolo noto.
+* **Analisi a intervalli regolari (Batch orari):** dedicata ai controlli statistici e comportamentali, raccoglie e valuta i dati ogni ora per studiare le abitudini dell'host e individuare eventuali anomalie nel tempo.
 
-## 1. Definizione Logica e Teorica delle Metriche di Sicurezza
+## 1. Definizione logica e teorica delle metriche di sicurezza
 
-Il modello si compone di **15 metriche indipendenti**, selezionate per coprire l'intero spettro delle anomalie di rete. Ciascuna metrica astrae uno specifico comportamento dell'host e lo traduce in un valore normalizzato $M_i \in \{0, 1\}$. Le metriche sono raggruppate in base all'approccio logico utilizzato per la loro valutazione.
+Il modello è composto da **15 metriche indipendenti**, selezionate per coprire l'intero spettro delle anomalie di rete. Ciascuna metrica esamina uno specifico comportamento dell'host e lo traduce in un valore normalizzato $M_i \in \{0, 1\}$. Le metriche sono raggruppate in base all'approccio logico utilizzato per la loro valutazione.
 
-### 1.A Metriche Deterministiche (In tempo reale)
+### 1.A Metriche deterministiche (In tempo reale)
 Queste metriche operano secondo una logica booleana e non necessitano di un periodo di apprendimento. Valutano la natura intrinseca di una singola connessione confrontandola con insiemi di dati noti a priori.
 
-* **1. Destination Reputation ($M_{rep}$)**
-  * **Razionale Teorico:** Valuta il livello di affidabilità degli *endpoint* esterni con cui l'host tenta di comunicare. Una connessione verso un nodo di rete la cui maliziosità è già certificata (es. server di Comando e Controllo noti, nodi di uscita Tor, o domini di *phishing*) compromette istantaneamente lo stato di sicurezza dell'host interno, configurando una certezza di infezione o esfiltrazione.
-  * **Implementazione Tecnica:** L'analizzatore estrae in tempo reale gli indirizzi IP di destinazione dai log di flusso (es. NetFlow) e i nomi a dominio estratti dalle query DNS. Questi indicatori di compromissione estratti dal traffico vengono confrontati in modo deterministico con piattaforme di *Threat Intelligence* aziendali (es. MISP) o *blacklist* pubbliche costantemente aggiornate.
-  * **Formalizzazione:** Sia $\mathcal{B}$ l'insieme dinamico degli Indicatori di Compromissione, che include tutti gli indirizzi IP e i domini globalmente riconosciuti come malevoli in un dato istante temporale. Sia $d$ l'indirizzo IP di destinazione di un flusso di rete generato e $q$ l'eventuale dominio interrogato dall'host $h$. Se l'host tenta di contattare una destinazione presente nella lista nera:
+### 1. Destination reputation ($M_{rep}$)
 
-    $$d \in \mathcal{B} \lor q \in \mathcal{B}$$
+* **Obiettivo:** Monitorare e validare il grado di affidabilità degli endpoint esterni con cui gli host della rete interna tentano di stabilire una connessione. L'identificazione di comunicazioni verso nodi già censiti come malevoli (ad esempio server di Command & Control, nodi di uscita Tor o domini di phishing) permette di rilevare tempestivamente uno stato di compromissione, prevenendo attività di esfiltrazione dati o persistenza dell'attacco.
+* **Metodologia di estrazione:** La raccolta dei dati viene effettuata tramite **ntopng**, configurato come sonda di monitoraggio passivo del traffico di rete. Lo strumento analizza in tempo reale i flussi NetFlow/IPFIX per estrarre gli indirizzi IP di destinazione e ispeziona il traffico DNS per ricavare i nomi di dominio (FQDN). Questi metadati vengono confrontati automaticamente con feed di *threat intelligence* e *blacklist* integrate nativamente o caricate esternamente nel sistema.
+* **Modello matematico:** Sia $\mathcal{B}$ l'insieme dinamico degli Indicatori di Compromissione (IoC) aggiornati. Se per un dato host $h$, l'indirizzo IP di destinazione $d$ o il dominio richiesto $q$ appartengono all'insieme malevolo, la metrica viene attivata:
 
-    l'evento viene immediatamente marcato come compromissione certa, restituendo $M_{rep} = 1$.
+    $$d \in \mathcal{B} \lor q \in \mathcal{B} \implies M_{rep} = 1$$
 
-* **2. Client Fingerprinting ($M_{ja4}$)**
-    * **Razionale Teorico:** L'uso diffuso della crittografia (TLS/SSL) protegge la privacy oscurando il contenuto dei pacchetti, ma al contempo nasconde le attività malevole ai tradizionali sistemi di ispezione. Tuttavia, la fase iniziale di negoziazione (*TLS Client Hello*), che avviene in chiaro, rivela il comportamento del software. Ogni applicazione (browser, script automatizzato o malware) negozia la connessione in modo unico, richiedendo specifici algoritmi, versioni e supporti. L'impronta JA4 cattura questa "firma comportamentale", permettendo di distinguere, ad esempio, un browser aziendale legittimo da uno strumento d'attacco o da un malware, indipendentemente dall'IP contattato.
-    * **Implementazione Tecnica:** Il sistema sfrutta le capacità di ispezione profonda dei NIDS (es. Suricata 7+) per estrarre le caratteristiche della connessione TLS e calcolare l'impronta JA4. Questa impronta (es. `t13d1516h2_8daaf6152771_a56c5b993250`) è modulare e divisa in tre sezioni: un prefisso in chiaro che descrive il protocollo e il numero di estensioni, un hash degli algoritmi crittografici supportati e un hash delle estensioni stesse. Questa firma viene confrontata in tempo reale con i database di *Threat Intelligence* (es. repository FoxIO) contenenti le impronte associate a strumenti malevoli (come Cobalt Strike, Metasploit o script elusivi).
-    * **Formalizzazione:** Sia $\mathcal{J}$ l'insieme delle impronte crittografiche JA4 classificate come malevole o sospette dalle fonti di *Threat Intelligence*. Sia $j$ l'impronta JA4 estratta dal pacchetto *Client Hello* generato dall'host $h$. Se l'impronta calcolata appartiene all'insieme delle firme malevole note:
+### 2. Client Fingerprinting ($M_{ja4}$)
 
-        $$j \in \mathcal{J}$$
+* **Obiettivo:** Identificare e classificare la natura del software che genera traffico di rete analizzando il suo fingerprinting durante la negoziazione dei protocolli cifrati (TLS). Poiché ogni applicazione (sia un browser legittimo o un malware) negozia la connessione in modo unico, questa metrica permette di distinguere strumenti autorizzati da software malevoli o non autorizzati, indipendentemente dalla destinazione contattata.
+* **Metodologia di estrazione:** L'estrazione dei dati avviene tramite **ntopng**, che agisce ispezionando la fase iniziale della connessione cifrata, nota come *TLS Client Hello*. **ntopng** analizza i parametri in chiaro inviati dal client (algoritmi supportati, versioni del protocollo ed estensioni) e calcola l'impronta **JA4**, una stringa modulare che rappresenta univocamente il comportamento del software di rete. Questa firma viene poi confrontata in tempo reale con database di *Threat Intelligence* che catalogano le impronte associate a strumenti d'attacco noti, come Cobalt Strike o Metasploit.
+* **Modello matematico:** Sia $\mathcal{J}$ l'insieme delle impronte JA4 classificate come malevole o sospette dalle fonti di intelligence. Sia $j$ l'impronta specifica calcolata da ntopng per l'host monitorato $h$. Se l'impronta appartiene all'insieme delle firme note per essere pericolose, la metrica certifica l'uso di software non autorizzato:
+  
+    $$j \in \mathcal{J} \implies M_{ja4} = 1$$
 
-        la metrica certifica l'impiego di software di rete non autorizzato o malevolo, attivandosi e restituendo $M_{ja4} = 1$.
+### 3. TLS Certificate Anomalies ($M_{cert}$)
 
-* **3. TLS Certificate Anomalies ($M_{cert}$)**
-  * **Razionale Teorico:** I siti web e i servizi cloud legittimi utilizzano certificati crittografici emessi da Autorità di Certificazione (CA) pubblicamente riconosciute e attendibili. Le infrastrutture d'attacco o i server C2 (*Command and Control*) improvvisati impiegano frequentemente certificati auto-firmati (*Self-Signed*), scaduti, o generati con parametri di validità palesemente anomali per risparmiare tempo o eludere i controlli di base.
-  * **Implementazione Tecnica:** Il sistema sfrutta sonde di *Deep Packet Inspection* per analizzare il pacchetto *TLS Certificate* inviato dal server al client durante l'handshake. Estrae i metadati del certificato X.509 (in particolare i campi *Issuer*, *Subject*, *Not Before* e *Not After*). Successivamente, verifica se la CA emittente appartiene al *Trust Store* aziendale (l'elenco delle autorità di cui ci si fida) e valuta la coerenza temporale delle date di validità.
-  * **Formalizzazione:** Sia $c$ il certificato TLS presentato dal server di destinazione. Definiamo $\mathcal{T}$ come l'insieme delle Autorità di Certificazione (CA) globalmente attendibili. Definiamo inoltre la funzione booleana $SelfSigned(c)$ (vera se il certificato è auto-firmato, ovvero se l'emittente coincide con il soggetto) e la funzione $Invalid(c)$ (vera se il certificato risulta scaduto o con date di validità non conformi). Se si verifica almeno una di queste condizioni anomale:
+* **Obiettivo:** Individuare canali di comunicazione potenzialmente pericolosi analizzando la validità e l'origine dei certificati crittografici utilizzati dai server esterni. Poiché gli attaccanti utilizzano spesso infrastrutture improvvisate con certificati auto-firmati, scaduti o emessi da autorità non riconosciute per risparmiare tempo o eludere i controlli, questa metrica funge da filtro critico per identificare server di Comando e Controllo (C2) o siti di phishing.
+* **Metodologia di estrazione:** L'analisi dei certificati viene effettuata tramite **ntopng**, che esegue una *Deep Packet Inspection* (DPI) durante lo scambio del pacchetto *TLS Certificate* nell'handshake. ntopng isola il certificato X.509 presentato dal server ed estrae automaticamente i metadati essenziali, tra cui l'autorità di certificazione emittente (Issuer), il soggetto (Subject) e le date di validità. Lo strumento verifica poi se l'ente emittente è presente nell'elenco delle autorità attendibili (Trust store) e se il certificato rispetta i vincoli temporali di validità.
+* **Modello matematico:** Sia $c$ il certificato TLS presentato dal server di destinazione. Definiamo $\mathcal{T}$ come l'insieme delle autorità di certificazione (CA) globalmente attendibili. La metrica valuta tre condizioni critiche: se l'emittente non è attendibile ( $Issuer(c) \notin \mathcal{T}$ ), se il certificato è auto-firmato ( $SelfSigned(c)$ ) o se è temporalmente non valido ( $Invalid(c)$ ). Se almeno una di queste condizioni è vera, la metrica si attiva:
 
-    $$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c)$$
+    $$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c) \implies M_{cert} = 1$$
 
-    il canale di comunicazione viene marcato come inaffidabile o potenzialmente compromesso, attivando $M_{cert} = 1$.
+### 4. Evasione SNI nel Traffico Cifrato ($M_{sni}$)
 
-* **4. Evasione SNI nel Traffico Cifrato ($M_{sni}$)**
-  * **Razionale Teorico:** Nel traffico HTTPS legittimo generato da browser o applicazioni moderne, il client inserisce sempre il nome del dominio di destinazione in chiaro durante la fase di *handshake* TLS (estensione SNI - *Server Name Indication*). Gli strumenti di *hacking* amatoriali, gli script malevoli o i malware che tentano di nascondersi contattando direttamente un indirizzo IP nudo omettendo l'estensione SNI, generano un'anomalia strutturale non tollerabile in una rete sicura.
-  * **Implementazione Tecnica:** Il motore NIDS analizza l'handshake TLS in uscita. Se viene rilevata una connessione crittografata diretta verso l'esterno in cui il campo `tls.sni` risulta completamente assente o vuoto, il sistema intercetta l'evasione in tempo reale prima ancora che il tunnel cifrato venga stabilito.
-  * **Formalizzazione:** Sia $f$ un flusso di rete crittografato (TLS) originato dall'host $h$ verso un IP pubblico. Sia $SNI(f)$ la funzione che estrae la stringa del *Server Name Indication*. Se il campo è vuoto:
+* **Obiettivo:** Rilevare tentativi di mascheramento delle comunicazioni verso l'esterno, verificando la presenza del parametro SNI (Server Name Indication) nelle connessioni cifrate. Poiché i browser e le applicazioni legittime includono sempre il nome del sito di destinazione in chiaro durante la connessione iniziale, l'assenza volontaria di questo dato (ad esempio, quando un malware tenta di contattare direttamente un indirizzo IP numerico per nascondersi) rivela un'evidente anomalia strutturale, tipica di script malevoli o strumenti di hacking.
+* **Metodologia di estrazione:** L'ispezione viene affidata a **ntopng**, che monitora passivamente il traffico di rete in uscita. Durante l'handshake del protocollo TLS (ovvero l'istante in cui client e server si accordano prima di cifrare i dati), lo strumento analizza l'estensione dedicata all'SNI. ntopng verifica in tempo reale se il campo `tls.sni` risulta popolato con un nome a dominio valido, intercettando immediatamente le connessioni in cui tale campo risulta completamente vuoto o mancante.
+* **Modello matematico:** Sia $f$ un flusso di rete crittografato (TLS) originato da un host $h$ verso un indirizzo IP pubblico. Definiamo la funzione $SNI(f)$ come l'operazione che estrae la stringa del SNI dal pacchetto analizzato. Se la funzione restituisce un valore vuoto, il sistema certifica un'evasione e attiva la penalità:
 
-    $$SNI(f) = \emptyset$$
-
-    Il sistema certifica l'uso di software di rete anomalo, assegnando la penalità immediata: $M_{sni} = 1$.
+    $$SNI(f) = \emptyset \implies M_{sni} = 1$$
 
 ### 1.B Metriche Statistiche e Comportamentali (Finestra di 1 ora)
 Queste metriche esplorano la "zona grigia", valutando variazioni anomale rispetto allo stato di quiete dell'host. Sfruttano l'ispezione profonda, la teoria degli insiemi (Novelty Detection) e lo scostamento statistico standardizzato ($Z_{robusto}$). Il calcolo avviene allo scoccare di ogni ora, confrontando i dati con la *baseline* degli ultimi **7 giorni**.
