@@ -183,101 +183,99 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 
 ---
 
-## 2. Sistema di Scoring Additivo e Normalizzazione (0-100)
+## 2. Architettura del sistema di scoring additivo
 
-Il modello operativo non valuta i singoli pacchetti in modo isolato, ma aggrega le anomalie per definire lo stato di salute generale del nodo. Per garantire un'analisi consistente e limitare l'esplosione combinatoria dei dati, il sistema di *scoring* si basa su regole precise di temporizzazione e normalizzazione.
+In questa sezione viene descritto il metodo con cui le diverse anomalie rilevate dalle metriche vengono aggregate per determinare il livello di salute complessivo di un host. L'obiettivo del sistema è superare la logica dei singoli allarmi isolati, fornendo invece un punteggio unico che rappresenti la gravità reale del comportamento dell'host. Attraverso l'assegnazione di pesi specifici a ogni violazione e un processo di normalizzazione matematica, il rischio viene visualizzato in una scala intuitiva da 0 a 100, permettendo agli analisti di identificare immediatamente le minacce che richiedono un intervento prioritario.
 
-### 2.1 Frequenza di Calcolo e Normalizzazione Matematica
-Per rispondere all'esigenza di correlare gli eventi senza sovraccaricare il sistema, lo *Score Globale* dell'host viene calcolato (o ricalcolato) in due scenari:
-1. **Event-driven (In tempo reale):** Immediatamente, non appena si attiva una metrica deterministica (es. $M_{rep}$ o $M_{ja4}$).
-2. **Time-driven (A fine batch):** Allo scadere di ogni finestra oraria (1 ora), aggregando i risultati delle metriche statistiche.
+### 2.1 Frequenza di calcolo e logica di normalizzazione
 
+Per garantire una risposta tempestiva senza sovraccaricare il sistema di monitoraggio, il calcolo dello **Score Globale** dell'host avviene seguendo due modalità distinte:
+1. **In tempo reale (Event-driven):** Il punteggio viene ricalcolato istantaneamente ogni volta che **ntopng** rileva l'attivazione di una metrica deterministica (ad esempio, se viene contattato un sito pericoloso o viene usato un software non autorizzato).
+2. **A intervalli orari (Time-driven):** Allo scadere di ogni ora, il sistema elabora tutti i dati statistici raccolti e aggiorna lo score in base ai comportamenti rilevati nell'ultima finestra temporale (1 ora).
 
-Per prevenire un'esplosione incontrollata del punteggio, il sistema implementa una **normalizzazione intrinseca basata sulla finestra temporale anziché sui singoli eventi**. 
+Per evitare che il punteggio cresca in modo incontrollato e diventi illeggibile, il sistema adotta una **normalizzazione basata sulla finestra temporale**. In termini semplici, la penalità viene assegnata per la presenza di un comportamento anomalo nell'arco dell'ora, e non per quante volte quell'azione viene ripetuta.
 
-È fondamentale chiarire che il punteggio **non è cumulativo per ogni singolo flusso di rete anomalo**. La trasformazione di ogni metrica in una variabile booleana ($M_i \in \{0, 1\}$) garantisce che la penalità venga assegnata esclusivamente per la *presenza* di quel comportamento nell'arco dell'ora monitorata, indipendentemente dalla sua frequenza di ripetizione. 
+Ad esempio, se un host effettua 1.000 connessioni verso una porta vietata all'interno della stessa ora, la metrica corrispondente scatterà una sola volta, applicando la penalità una sola volta. L'intensità dell'attacco non viene ignorata: essa è già stata valutata dai calcoli statistici (come lo Z-Score robusto) che hanno fatto scattare l'allarme. Questo meccanismo garantisce che il punteggio finale rimanga sempre all'interno della scala 0-100, rendendo facile per l'analista capire la gravità della situazione.
 
-Ad esempio, se un host genera 1.000 connessioni evasive verso una porta non standard all'interno dello stesso batch orario, la metrica non assegnerà 1.000 penalità consecutive, ma "scatterà" una sola volta per quell'ora ($M_{proto} = 1$). L'intensità e il volume dell'attacco non vengono ignorati dal modello, ma sono già valutati e assorbiti a monte dal calcolo dello $Z_{robusto}$, il quale funge da interruttore per attivare o meno la metrica. Questo meccanismo garantisce che lo score finale rimanga confinato e proporzionato all'interno della scala 0-100.
+### 2.2 Assegnazione dei pesi e criteri di rischio
+I pesi assegnati alle singole metriche non sono casuali, ma derivano da un'analisi del rischio basata su due fattori: l'**impatto** dell'anomalia e la **probabilità di falsi positivi**. Ogni anomalia rilevata aggiunge un punteggio predefinito:
 
-### 2.2 Ponderazione delle Soglie di Rischio
-I "pesi" assegnati alle singole metriche non sono casuali, ma derivano da un'analisi del rischio basata su due fattori: l'**impatto** dell'anomalia (es. esfiltrazione vs ricognizione) e la **probabilità di falsi positivi**. Ogni anomalia rilevata ($M_i = 1$) aggiunge un punteggio predefinito:
-
-* **Gravità Critica (+50 punti):** Assegnati a comportamenti con un livello di confidenza quasi assoluto e falsi positivi prossimi allo zero. Una singola violazione (es. contattare una destinazione malevola nota) compromette per metà l'affidabilità del nodo. Due violazioni critiche saturate portano subito lo score a 100.
-  * Destination Reputation ($M_{rep}$)
-  * Client Fingerprinting ($M_{ja4}$)
+* **Gravità critica (+50 punti):** Assegnati a comportamenti che indicano compromissione certa e falsi positivi pari allo zero. Una singola violazione compromette per metà l'affidabilità del nodo.
+  * Destination reputation ($M_{rep}$)
+  * Client fingerprinting ($M_{ja4}$)
   * SNI Evasion ($M_{sni}$)
-* **Sospetto Alto (+40 punti):** Anomalie strutturali gravi, ma che richiedono almeno un'altra anomalia secondaria per certificare la compromissione totale (superamento soglia 60).
-  * TLS Certificate Anomalies ($M_{cert}$)
-  * Server Role Detection ($M_{srv}$)
-* **Evasione e Ricognizione (+30 punti):** Comportamenti tipici delle fasi intermedie di un attacco (es. movimenti laterali), che potrebbero però coincidere con rari interventi di amministrazione IT.
-  * Non-Standard Port/Protocol ($M_{proto}$)
-  * Internal Scanning / Fan-out ($M_{scan}$)
-  * Connection Failure Rate ($M_{fail}$)
-  * Session duration / Reverse Shell ($M_{dur}$)
+* **Sospetto alto (+40 punti):** Anomalie strutturali gravi, ma che richiedono almeno un'altra anomalia secondaria per certificare la compromissione totale (superamento soglia 60).
+  * TLS Certificate anomalies ($M_{cert}$)
+  * Server role detection ($M_{srv}$)
+* **Evasione e ricognizione (+30 punti):** Comportamenti tipici delle fasi intermedie di un attacco (es. movimenti laterali), che potrebbero però coincidere con interventi di amministrazione.
+  * Non-standard Port/Protocol ($M_{proto}$)
+  * Internal scanning / Fan-out ($M_{scan}$)
+  * Connection failure rate ($M_{fail}$)
+  * Session duration / Reverse shell ($M_{dur}$)
   * ARP Storm ($M_{arp}$)
-  * RTT Latency / Hidden Routing ($M_{rtt}$)
-* **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie puramente quantitative. Hanno un'alta probabilità di falsi positivi (es. un dipendente che usa WeTransfer genera un'asimmetria volumetrica), pertanto il peso ridotto garantisce che l'host rimanga in "zona verde/sicura" se l'evento è isolato.
-  * Novel Protocol Detection ($M_{new}$)
+  * RTT Latency / Hidden routing ($M_{rtt}$)
+* **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie quantitative. Hanno un'alta probabilità di falsi positivi, pertanto il peso ridotto garantisce che l'host rimanga in zona "verde/sicura" se l'evento è unico.
+  * Novel protocol detection ($M_{new}$)
   * Asimmetria Volumetrica ($M_{vol}$)
-* **Segnali Deboli (+10 punti):** Anomalie che, prese singolarmente, non sono sufficienti per destare allarme, ma fungono da "moltiplicatori" per confermare altre minacce.
+* **Segnali Deboli (+10 punti):** Anomalie che, prese singolarmente, non sono sufficienti per innescare allarme, ma fungono da moltiplicatori per confermare altre minacce.
   * DNS Anomalies ($M_{dns}$)
-  * Unidirectional Flow ($M_{uni}$)
+  * Unidirectional flow ($M_{uni}$)
 
-L'equazione finale per il calcolo dello *Score Globale* dell'host risulta matematicamente limitata a un valore massimo di 100 tramite la funzione minimo:
+Il calcolo finale somma i punti di tutte le metriche attive, limitando matematicamente il risultato a un massimo di 100 per mantenere lo score coerente e interpretabile:
 
 $$S(h) = \min\left(100, \sum_{i=1}^{15} \text{Punti}_i \cdot M_i\right)$$
 
 ---
 
-## 3. Verdetto Operativo: Dall'Host all'Intera Rete
+## 3. Dall'host all'intera rete
 
-Il calcolo dell'equazione produce un valore intero compreso tra 0 e 100. Per rispondere operativamente alla necessità di definire se il comportamento di un nodo "va bene o va male", il sistema mappa il risultato $S(h)$ su tre fasce di rischio predefinite. 
+Il calcolo dell'equazione produce un valore intero compreso tra 0 e 100. Per capire se il comportamento di un nodo "va bene" oppure "va male", il sistema mappa il risultato $S(h)$ su tre fasce di rischio predefinite. 
 
-Allo stesso tempo, per valutare la postura di sicurezza dell'intera infrastruttura, la *dashboard* degli analisti applica una logica basata sul caso peggiore (*Worst-Case Scenario*). Lo stato globale della rete è determinato dal punteggio massimo registrato tra tutti gli host attivi ( max $S(h)$ ), mappandosi direttamente sulle stesse tre fasce:
+Allo stesso tempo, per valutare la sicurezza dell'intera rete, il sistema applica una logica basata sul caso peggiore. Lo stato globale della rete è determinato dal punteggio massimo registrato tra tutti gli host attivi ( max $S(h)$ ), mappandosi direttamente sulle tre fasce:
 
-* **Stato Regolare / Rete Sicura (Verde) $\rightarrow$ [0 - 29 punti]**
-  * **Singolo Host:** Svolge le sue normali attività. Anche in presenza di un isolato picco volumetrico (20 punti) o di un leggero traffico automatizzato (10 punti), il punteggio cumulativo rimane sotto la soglia di allarme. 
-  * **Intera Rete:** Se nessun host supera i 29 punti, l'infrastruttura è considerata integra e non è richiesto alcun intervento.
+* **Stato regolare / Rete sicura (Verde) $\rightarrow$ [0 - 29 punti]**
+  * **Singolo host:** Svolge le sue normali attività. Anche in presenza di un isolato picco volumetrico (20 punti) o della presenza di un flusso unidirezionale, il punteggio cumulativo rimane sotto la soglia di allarme. 
+  * **Intera rete:** Se nessun host supera i 29 punti, l'infrastruttura è considerata integra e non è richiesto alcun intervento.
 
-* **Zona Grigia / Rete in Osservazione (Giallo) $\rightarrow$ [30 - 59 punti]**
-  * **Singolo Host:** Mostra variazioni anomale. Ad esempio, potrebbe aver iniziato a usare porte logiche inedite (20 punti) associato a un traffico meccanico (10 punti) per un totale di 30 punti. Non vi è certezza matematica di compromissione, ma l'host scala le priorità nel sistema di monitoraggio.
-  * **Intera Rete:** La rete è tecnicamente intatta, ma la presenza di host in questa fascia richiede attenzione per prevenire deviazioni comportamentali o minacce silenziose (*Low and Slow*).
+* **Zona grigia / Rete in osservazione (Giallo) $\rightarrow$ [30 - 59 punti]**
+  * **Singolo host:** Mostra variazioni anomale. Ad esempio, potrebbe aver iniziato a usare porte diverse dallo standard associato all'utilizzo di nuovi protocolli (totale 50 punti). Non vi è certezza matematica di compromissione, ma l'host scala le priorità nel sistema di monitoraggio (host sospetto).
+  * **Intera rete:** La rete è tecnicamente intatta, ma la presenza di host in questa fascia richiede attenzione per prevenire deviazioni comportamentali o minacce silenziose.
 
-* **Stato Critico / Rete Compromessa (Rosso) $\rightarrow$ [60 - 100 punti]**
-  * **Singolo Host:** Il superamento di quota 60 certifica la convergenza di anomalie gravi. L'host deve necessariamente aver contattato una destinazione malevola nota (50 punti) supportata da un'altra anomalia, oppure aver esibito un accumulo massiccio di comportamenti evasivi contemporanei.
-  * **Intera Rete:** Poiché in *Cybersecurity* una rete è forte quanto il suo anello più debole, un solo host in stato critico (max $S(h) \ge 60$) dichiara l'intero perimetro compromesso, innescando l'immediata *Incident Response*.
+* **Stato critico / Rete compromessa (Rosso) $\rightarrow$ [60 - 100 punti]**
+  * **Singolo host:** Il superamento di quota 60 certifica la convergenza di anomalie gravi. L'host deve necessariamente aver contattato una destinazione malevola nota (50 punti) supportata da un'altra anomalia, oppure aver accumulato più comportamenti anomali.
+  * **Intera rete:** Poiché in *Cybersecurity* una rete è forte quanto il suo anello più debole, un solo host in stato critico (max $S(h) \ge 60$) dichiara l'intero perimetro compromesso, innescando l'immediata neutralizzazione dell'attacco (*Incident Response*).
   
 ---
 
-## 4. Analisi Comparativa e Architettura del Sistema
+## 4. Analisi comparativa dell'architettura del sistema
 
-La progettazione di questo modello operativo nasce da un'analisi critica delle più recenti evoluzioni nella letteratura scientifica in ambito *Cybersecurity* (2024-2025). La solidità del sistema non risiede solo nelle formule matematiche adottate, ma nella scelta deliberata di un'architettura che superi gli attuali limiti operativi dell'Intelligenza Artificiale, unita a un rigoroso dimensionamento dei parametri statistici e temporali.
+La progettazione di questo modello operativo nasce da un'analisi critica delle più recenti evoluzioni nella letteratura scientifica in ambito *Cybersecurity*. La solidità del sistema non risiede solo nelle formule matematiche adottate, ma nella scelta di un'architettura che superi gli attuali limiti operativi dell'intelligenza artificiale, unita a un rigoroso dimensionamento dei parametri statistici e temporali.
 
-### 4.1 L'Uso della Statistica Robusta per superare il "Rumore" di Rete
-L'applicazione di modelli statistici classici per la *Network Anomaly Detection* sconta storicamente il limite della sensibilità agli *outlier*: i normali (e legittimi) picchi di traffico aziendale alterano la media aritmetica e la deviazione standard, generando cecità statistica o falsi positivi.
+### 4.1 L'uso della statistica robusta per superare il "rumore" di rete
+L'applicazione di modelli statistici classici per la *Network Anomaly Detection* sconta storicamente il limite della sensibilità agli *outlier*: i normali (e legittimi) picchi di traffico alterano la media aritmetica e la deviazione standard, generando cecità statistica o falsi positivi.
 
-Per risolvere questo problema, la letteratura più recente ha validato l'efficacia della statistica robusta applicata al traffico di rete. Romo-Chavero et al. [1] (2025) propongono un framework in cui la MAD (*Median Absolute Deviation*) viene impiegata per rilevare le anomalie del protocollo BGP, dimostrando che il calcolo delle deviazioni basato sulla Mediana garantisce un'elevata resistenza ai picchi di traffico non malevoli. 
+Per risolvere questo problema, la letteratura più recente ha validato l'efficacia della statistica robusta applicata al traffico di rete. Romo-Chavero et al. [1] (2025) propongono un framework in cui la MAD (*Median Absolute Deviation*) viene impiegata per rilevare le anomalie del protocollo BGP, dimostrando che il calcolo delle deviazioni basato sulla mediana garantisce un'elevata resistenza ai naturali picchi di traffico. 
 
-Il modello proposto in questa tesi condivide l'assunto teorico validato da Romo-Chavero et al., adottando la MAD e lo $Z_{robusto}$ come motore statistico per le metriche comportamentali. Tuttavia, se ne distacca per l'efficienza applicativa: mentre nella letteratura accademica la MAD viene spesso usata solo come fase di preparazione dati (*labeling*) per addestrare successivi e pesanti modelli di Machine Learning, il nostro sistema utilizza i superamenti della soglia dello $Z_{robusto}$ per alimentare direttamente il sistema di *scoring*. Questa scelta mantiene intatta la resilienza statistica, ma azzera i costi di addestramento computazionale.
+Il modello proposto in questa tesi condivide l'assunto teorico validato da Romo-Chavero et al., adottando la MAD e lo $Z_{robusto}$ come motore statistico per le metriche comportamentali. Tuttavia, se ne distacca per l'efficienza applicativa: mentre nella letteratura accademica la MAD viene spesso usata solo come fase di preparazione dati (*labeling*) per addestrare successivi e pesanti modelli di machine learning, il nostro sistema utilizza i superamenti della soglia dello $Z_{robusto}$ per alimentare direttamente il sistema di **scoring**. Questa scelta mantiene intatta la elasticità statistica, ma azzera i costi di addestramento computazionale.
 
-### 4.2 Giustificazione dei Parametri Statistici e Temporali
-Una volta definita e validata l'architettura deterministica rispetto allo Stato dell'Arte, è fondamentale dimensionare correttamente i parametri operativi affinché il modello si adatti al traffico reale senza generare *Alert Fatigue*.
-* **La Soglia di Anomalia ($Z_{robusto} > 3$):** L'impostazione della soglia di tolleranza $\theta = 3$ non è arbitraria, ma deriva direttamente dalla "Regola Empirica" della statistica descrittiva (nota anche come regola del 68-95-99.7). 
+### 4.2 Giustificazione dei parametri statistici e temporali
+Una volta definita e validata l'architettura deterministica, è fondamentale dimensionare correttamente i parametri affinché il modello si adatti al traffico reale evitando di sommergere gli analisti di falsi allarmi (Alert Fatigue).
+* **La soglia di anomalia ($Z_{robusto} > 3$):** L'impostazione della soglia di tolleranza $\theta = 3$ non è casuale, ma deriva direttamente dalla "regola empirica" della statistica descrittiva (nota come regola del 68-95-99.7). 
 
-Assumendo che il traffico di rete tenda a distribuirsi attorno a un valore centrale (la Mediana), la dispersione misurata tramite la MAD ci permette di standardizzare le distanze:
-* Uno Z-Score pari a **1** copre circa il **68%** delle normali fluttuazioni comportamentali.
-* Uno Z-Score pari a **2** copre circa il **95%** della varianza regolare.
+Basandoci sulla dispersione dei dati MAD, sappiamo che la normalità si distribuisce in tre fascie:
+* Uno Z-Score pari a **1** copre circa il **68%** dei normali comportamenti dell'host.
+* Uno Z-Score pari a **2** copre circa il **95%** delle attività regolari.
 * Uno Z-Score pari a **3** ingloba il **99.7%** dei comportamenti ordinari dell'host.
 
-Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia estremamente conservativa è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire il fenomeno dell'affaticamento da allarmi.
-* **La Finestra di Osservazione (Batch di 1 Ora):** Le metriche statistiche richiedono l'accumulo di un *set* di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra temporale di osservazione di **1 ora** (rispetto a un'analisi al minuto o giornaliera) come compromesso architetturale ottimale:
-* **Contro il micro-batch (es. 5 minuti):** Finestre troppo brevi sono sensibili ai "micro-burst" (picchi istantanei legittimi, come il download di un file), che invaliderebbero la statistica generando continuo "rumore".
-* **Contro il macro-batch (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inefficace per la neutralizzazione degli attacchi (*Incident Response*). La finestra oraria garantisce un volume di campioni statisticamente rilevante, mantenendo un tempo di reazione compatibile con le dinamiche di contenimento di un attacco.
-* **La Profondità dello Storico (Baseline di 7 Giorni):** Il calcolo della Mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali, intrinsecamente legata agli orari lavorativi e ai giorni di riposo. La profondità di 7 giorni assicura che il comportamento attuale venga confrontato con una baseline che ha già "imparato" i pattern dell'intera settimana, rendendo il modello consapevole dei cicli aziendali.
+Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire falsi allarmi (Alter Fatigue).
+* **La finestra di osservazione (batch di 1 ora):** Le metriche statistiche richiedono l'accumulo di un set di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra di osservazione di **1 ora**, una scelta che rappresenta il miglior compromesso tecnico:
+* **Contro delle analisi troppo brevi (es. 5 minuti):** Finestre troppo brevi sono sensibili ai micro-burst ovvero picchi istantanei legittimi, come il download di un file, che invaliderebbero la statistica generando allarmi inutili.
+* **Contro delle analisi troppo lunghe (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inutile per la neutralizzazione degli attacchi (*Incident Response*). La finestra oraria bilancia perfettamente il rigore matematico e i tempi di reazione necessari per difendere la rete.
+* **La profondità dello storico (baseline di 7 giorni):** Il calcolo della mediana $\tilde{x}$ e della $MAD$ avviene su una finestra storica di **7 giorni**. Questa scelta è dettata dalla necessità di assorbire la naturale **stagionalità settimanale** delle reti aziendali, naturalmente legata agli orari lavorativi e ai giorni di riposo. La profondità di 7 giorni assicura che il comportamento attuale venga confrontato con una baseline che ha già imparato i pattern dell'intera settimana, rendendo il modello consapevole dei cicli aziendali.
 
-### 4.3 Vantaggi Operativi del Risk Scoring Deterministico rispetto all'AI
+### 4.3 Vantaggi operativi del risk scoring deterministico rispetto all'AI
 
-Sebbene l'Intelligenza Artificiale (AI) sia molto popolare nella ricerca accademica per rilevare le intrusioni di rete, la sua applicazione pratica nel mondo reale sconta diverse criticità. Gli stessi ricercatori che sviluppano questi modelli ammettono spesso la necessità di approcci più snelli e gestibili.
+Sebbene l'intelligenza artificiale (AI) sia molto popolare nella ricerca accademica per rilevare le intrusioni di rete, la sua applicazione pratica nel mondo reale sconta diverse criticità. Gli stessi ricercatori che sviluppano questi modelli ammettono spesso la necessità di approcci più snelli e gestibili.
 
 Il primo grande ostacolo riguarda i **costi computazionali e il cosiddetto *Concept Drift***. Come evidenziato dallo studio di Talukder et al. [2] (2025), i modelli di *Machine Learning* richiedono un'enorme potenza di calcolo, rendendoli difficili da usare su reti ad alto traffico. Inoltre, l'AI impara esclusivamente dai dati passati: se gli attaccanti inventano una nuova tecnica per eludere le difese, il modello diventa subito obsoleto (subisce una "deriva del concetto" o *Concept Drift*) e deve essere faticosamente riaddestrato con nuovi dati.
 
@@ -318,7 +316,7 @@ A livello base della rete (Livello 2 o *Data Link*), questa esplorazione si trad
 
 ---
 
-## 5. Riferimenti Bibliografici
+## 5. Riferimenti bibliografici
 
 [1] M. A. Romo-Chavero, G. de los Ríos Alatorre, J. A. Cantoral-Ceballos, J. A. Pérez-Díaz, and C. Martinez-Cagnazzo, *"A Hybrid Model for BGP Anomaly Detection Using Median Absolute Deviation and Machine Learning"*, 2025. [DOI: 10.1109/OJCOMS.2025.3550010](https://doi.org/10.1109/OJCOMS.2025.3550010)
 
