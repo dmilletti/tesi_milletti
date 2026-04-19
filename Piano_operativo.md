@@ -113,59 +113,73 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
   
     $$Z_{robusto} > 3 \implies M_{dns} = 1$$
 
-* **11. Unidirectional Flow ($M_{uni}$)**
-    * **Razionale Teorico:** Il protocollo TCP è progettato per essere intrinsecamente bidirezionale; anche in trasferimenti di dati massivi verso un'unica direzione, il ricevente deve trasmettere pacchetti di controllo (ACK) per validare la sessione. La comparsa di flussi "monchi", in cui il traffico viaggia esclusivamente verso l'esterno senza alcuna risposta, indica un'anomalia strutturale nella fisica della comunicazione. Tale comportamento astrae scenari critici come attacchi DOS (es. SYN Flood), tecniche di scansione "cieca" (*blind scanning*) o l'uso di indirizzi IP contraffatti (*spoofing*) che impediscono la ricezione del traffico di ritorno.
-    * **Implementazione Tecnica:** L'analisi valuta l'equilibrio dei flussi a livello di trasporto durante la finestra di osservazione. Alla chiusura del batch, il sistema calcola la quota di connessioni originate dall'host che non hanno registrato pacchetti in ricezione. Il valore viene confrontato con la baseline storica dell'host per distinguere tra sporadici disservizi di rete e un'attività asimmetrica sistematica.
-    * **Formalizzazione:** Sia $F_{tot}$ l'insieme dei flussi TCP originati dall'host $h$ nella finestra oraria $t$. Definiamo $F_{uni} \subseteq F_{tot}$ il sottoinsieme dei flussi privi di pacchetti in ricezione. Il tasso di unidirezionalità orario è definito come:
- 
-        $$u_t = \frac{|F_{uni}|}{|F_{tot}|}$$
-      
-        Siano $\tilde{u}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* storiche (7 giorni). Lo scostamento statistico standardizzato è:
-      
-        $$Z_{robusto} = \frac{|u_t - \tilde{u}|}{MAD}$$
-      
-        Se lo scostamento è eccezionale ($Z_{robusto} > 3$) e il tasso attuale è superiore alla mediana storica ($u_t > \tilde{u}$), si certifica l'anomalia strutturale: $M_{uni} = 1$.
+### 11. Unidirectional flow ($M_{uni}$)
 
+* **Obiettivo:** Rilevare anomalie strutturali nella comunicazione causate da traffico a senso unico. Il protocollo TCP è progettato per essere bidirezionale: anche in caso di invio massiccio di dati, il ricevente deve sempre trasmettere dei pacchetti ACK di conferma. La presenza di flussi in cui i dati viaggiano solo verso l'esterno senza ricevere risposte indica un'anomalia tipica di attacchi DOS (come il SYN Flood), scansioni di rete effettuate alla cieca o l'uso di indirizzi IP falsificati (IP Spoofing).
+* **Metodologia di estrazione:** L'analisi del bilanciamento dei flussi è affidata a **ntopng**, che monitora passivamente lo stato delle sessioni di rete a livello di trasporto (L4). Al termine di ogni finestra oraria (1 ora), lo strumento calcola la percentuale di connessioni avviate dal dispositivo monitorato che non hanno registrato alcun pacchetto in ricezione. Per evitare falsi allarmi dovuti a momentanei malfunzionamenti di internet, ntopng confronta questo dato attuale con la tolleranza storica dell'host.
+* **Modello matematico:** Definiamo $F_{tot}$ come l'insieme totale dei flussi TCP generati dall'host nell'ora corrente $t$, e $F_{uni} \subseteq F_{tot}$ come il sottoinsieme costituito dai soli flussi privi di pacchetti in ricezione. Il tasso orario di flussi unidirezionali si esprime come:
 
-* **12. Connection Failure Rate ($M_{fail}$)**
-  * **Razionale Teorico:** Nella normale operatività aziendale, la stragrande maggioranza dei tentativi di connessione (es. *handshake* TCP o richieste DNS) avviati da un client legittimo si conclude con successo. Al contrario, un software malevolo impegnato in attività di ricognizione silenziosa della rete interna (*stealth scanning*) o nella ricerca di un server di Comando e Controllo di riserva (tramite DGA), genererà inevitabilmente una vasta mole di tentativi di connessione a vuoto (esitanti in pacchetti *RST* o *Timeout*). Un'impennata improvvisa del tasso di fallimento astrae perfettamente questo comportamento anomalo di "ricerca alla cieca".
-  * **Implementazione Tecnica:** Il NIDS (Suricata) tiene traccia dello stato di terminazione di ogni connessione bidirezionale, registrando se un flusso è stato stabilito correttamente o se è fallito/rifiutato. Al termine del batch orario, il sistema aggrega tutti i flussi originati dall'host monitorato e calcola il rapporto percentuale tra le connessioni fallite e il totale dei tentativi effettuati, confrontandolo poi con la tolleranza storica dell'host.
-  * **Formalizzazione:** Sia $F_{tot}$ l'insieme di tutti i flussi di rete originati dall'host $h$ nella finestra oraria corrente $t$. Sia $F_{fail} \subseteq F_{tot}$ il sottoinsieme dei flussi terminati con esito anomalo. Il tasso di fallimento orario è definito come:
+    $$u_t = \frac{|F_{uni}|}{|F_{tot}|}$$
+
+    Il sistema valuta poi lo scostamento statistico standardizzato (Z-Score robusto) confrontando il tasso attuale ($u_t$) con la mediana ($\tilde{u}$) e la dispersione assoluta ($MAD$) registrate nei 7 giorni precedenti:
+
+    $$Z_{robusto} = \frac{|u_t - \tilde{u}|}{MAD}$$
+
+    Se l'analisi evidenzia uno particolare scostamento ($Z_{robusto} > 3$) e, allo stesso tempo, la percentuale attuale di flussi senza risposta supera la soglia abituale dell'host ($u_t > \tilde{u}$), l'anomalia viene certificata attivando la metrica:
+  
+    $$Z_{robusto} > 3 \land u_t > \tilde{u} \implies M_{uni} = 1$$
+
+### 12. Connection failure rate ($M_{fail}$)
+
+* **Obiettivo:** Rilevare attività di scansione silenziosa o tentativi disperati di contattare server malevoli monitorando le connessioni fallite. Nella normale operatività di un'azienda, la quasi tutte le comunicazioni avviate da un host legittimo va a buon fine. Al contrario, un malware che cerca dispositivi vulnerabili alla cieca o che tenta di rintracciare un server di comando e controllo di riserva utilizzando domini generati casualmente genererà una valanga di errori (come connessioni rifiutate o scadute per timeout). Un'impennata di questi fallimenti è dunque un segnale di ricerca malevola.
+* **Metodologia di estrazione:** Il tracciamento delle sessioni è affidato a **ntopng**, che monitora passivamente l'esito di ogni singola comunicazione. Lo strumento registra se un flusso di rete viene stabilito correttamente o se viene interrotto in modo anomalo (ad esempio tramite pacchetti RST). Al termine della finestra oraria, ntopng aggrega tutti questi dati per calcolare il tasso percentuale di fallimento dell'host.
+* **Modello matematico:** Definiamo $F_{tot}$ come l'insieme di tutti i flussi di rete originati dall'host nell'ora corrente $t$, e $F_{fail} \subseteq F_{tot}$ come il sottoinsieme dei flussi terminati con un esito anomalo. Il tasso di fallimento orario si esprime come:
 
     $$r_t = \frac{|F_{fail}|}{|F_{tot}|}$$
 
-    Siano $\tilde{r}$ e $MAD$ rispettivamente la Mediana e la *Median Absolute Deviation* dei tassi di fallimento storici (finestra mobile di 7 giorni). Il sistema calcola lo scostamento statistico standardizzato:
+    Il sistema determina l'anomalia calcolando lo scostamento statistico standardizzato (Z-Score robusto), confrontando il tasso attuale ($r_t$) con la mediana ($\tilde{r}$) e la dispersione assoluta ($MAD$) storiche (calcolate sui 7 giorni precedenti):
 
     $$Z_{robusto} = \frac{|r_t - \tilde{r}|}{MAD}$$
 
-    Se il tasso di errore subisce un incremento eccezionale rispetto alla consuetudine dell'host ($Z_{robusto} > 3$), l'anomalia esplorativa viene certificata, portando $M_{fail} = 1$.
+    Se l'analisi rileva un incremento degli errori rispetto all'abituale tolleranza dell'host ($Z_{robusto} > 3$), l'attività malevola viene confermata:
+  
+    $$Z_{robusto} > 3 \implies M_{fail} = 1$$
 
-* **13. Session Duration / Reverse Shell ($M_{dur}$)**
-  * **Razionale Teorico:** Il traffico web generato da un utente umano è intrinsecamente "a raffiche" (*bursty*): le connessioni vengono aperte per scaricare risorse e chiuse rapidamente. Al contrario, un attaccante che stabilisce una *Reverse Shell* o un tunnel persistente necessita di mantenere la sessione aperta per ore o giorni per inviare comandi interattivi o esfiltrare dati. Questa metrica identifica i flussi che rimangono attivi per tempi sproporzionati rispetto alla norma statistica dell'host.
-  * **Implementazione Tecnica:** Il sistema analizza il campo `flow.age` nei log di Suricata, che indica la durata in secondi di ogni sessione. Allo scadere del batch orario, si estrae il valore massimo di durata osservato tra tutti i flussi attivi o chiusi nell'ora. Questo dato viene confrontato con la distribuzione storica (ultimi 7 giorni) delle durate massime registrate dall'host.
-  * **Formalizzazione:** Sia $T$ l'insieme delle durate (in secondi) dei flussi originati dall'host $h$ nell'ora $t$. Sia $x_t = \max(T)$ il valore di persistenza massima. Siano $\tilde{x}$ e $MAD$ la Mediana e la *Median Absolute Deviation* storiche. Lo scostamento standardizzato è:
-    
+### 13. Session duration / Reverse shell ($M_{dur}$)
+
+* **Obiettivo:** Rilevare connessioni di rete che rimangono attive per un lasso di tempo innaturalmente lungo, segnale evidente di un canale di controllo remoto non autorizzato come una Reverse shell o un tunnel persistente. Il traffico generato da un normale utente (come la navigazione web) è per sua natura a raffiche: le connessioni si aprono per scaricare i dati e si chiudono quasi subito. Al contrario, un attaccante necessita di mantenere una sessione aperta per ore o giorni, per potersi inviare comandi interattivi al momento del bisogno.
+* **Metodologia di estrazione:** Il tracciamento dei tempi è assegnato a **ntopng**, che misura costantemente la durata di ogni singola sessione di rete in secondi. Allo scadere del batch orario, lo strumento estrae il valore massimo di durata osservato tra tutti i flussi (attivi o chiusi) generati in quell'ora. Questo picco di durata temporale viene poi confrontato con la baseline delle durate massime registrate per quell'host specifico nei giorni precedenti.
+* **Modello matematico:** Sia $T$ l'insieme delle durate (in secondi) di tutti i flussi originati dall'host nell'ora corrente, e sia $x_t = \max(T)$ il valore di durata massima. Il sistema calcola lo scostamento statistico standardizzato (Z-Score robusto) confrontando questo valore con la mediana ($\tilde{x}$) e la dispersione assoluta ($MAD$) calcolate sui 7 giorni precedenti:
+
     $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
-    
-    Se $Z_{robusto} > 3$ e la durata osservata è superiore alla mediana ($x_t > \tilde{x}$), si identifica una persistenza anomala e si impone $M_{dur} = 1$.
 
-* **14. ARP Storm ($M_{arp}$)**
-  * **Razionale Teorico:** Prima di poter propagare un'infezione nella rete locale (es. un *Worm* o un *Ransomware* autopropagante), il malware deve mappare fisicamente i dispositivi adiacenti a Livello 2 (Data Link). Per farlo, genera una tempesta di richieste ARP (*Broadcast Storm*) chiedendo i MAC address di tutti i possibili IP della sottorete. Questo comportamento genera un picco volumetrico di protocolli di servizio totalmente estraneo alla normale navigazione umana.
-  * **Implementazione Tecnica:** Il sensore di rete conta il numero totale di richieste ARP generate dall'host nella finestra oraria e lo confronta con il volume mediano storico.
-  * **Formalizzazione:** Sia $A_t$ il numero totale di query ARP originate da $h$ nell'ora corrente $t$. Siano $\tilde{A}$ e $MAD$ la Mediana e la dispersione assoluta dei volumi ARP storici. Lo scostamento è:
+    Affinché scatti l'allarme, devono verificarsi due condizioni: lo scostamento temporale deve essere insolito ($Z_{robusto} > 3$) e la durata osservata deve essere effettivamente maggiore dell'abitudine dell'host ($x_t > \tilde{x}$). Se entrambe sono vere, si certifica una persistenza anomala:
+
+    $$Z_{robusto} > 3 \land x_t > \tilde{x} \implies M_{dur} = 1$$
+
+### 14. ARP Storm ($M_{arp}$)
+
+* **Obiettivo:** Individuare le fasi preparatorie di un attacco *ransomware* o l'espansione di un *worm* all'interno della rete locale. Prima di poter infettare altri dispositivi, questi malware di solito devono mappare l'ambiente circostante: per farlo, inviano una "tempesta" di richieste ARP (**ARP Storm**) per scoprire gli indirizzi fisici (MAC address) di tutti i computer collegati alla stessa rete. Questo comportamento esplorativo, massiccio e molto rapido, è totalmente sconosciuto alla normale operatività di un computer aziendale.
+* **Metodologia di estrazione:** Il monitoraggio di queste comunicazioni basilari è affidato a **ntopng**, che analizza il traffico al livello più basso della rete locale (L2). ntopng intercetta e somma tutte le singole interrogazioni ARP (messaggi del tipo: "Chi ha questo indirizzo IP?") generate dal computer monitorato allo scadere della finestra oraria. Questo volume totale viene poi messo a confronto con le abitudini storiche del dispositivo.
+* **Modello matematico:** Sia $A_t$ il numero totale di richieste ARP inviate dal dispositivo $h$ nell'ora in corso $t$. Il sistema determina l'anomalia calcolando lo scostamento statistico standardizzato (Z-Score robusto), confrontando il volume attuale ($A_t$) con la mediana ($\tilde{A}$) e la dispersione assoluta ($MAD$) del traffico ARP storico del nodo (profilo a 7 giorni):
 
     $$Z_{robusto} = \frac{|A_t - \tilde{A}|}{MAD}$$
 
-    Se il volume di traffico L2 subisce un incremento eccezionale ($Z_{robusto} > 3$) indicando una mappatura fisica ostile, si impone $M_{arp} = 1$.
+    Se il volume di queste richieste locali subisce un incremento notevole rispetto alla norma ($Z_{robusto} > 3$), il sistema certifica che è in corso una mappatura fisica della rete e fa scattare l'allarme:
 
-* **15. RTT Latency / Hidden Routing ($M_{rtt}$)**
-  * **Razionale Teorico:** Le normali comunicazioni aziendali verso servizi Cloud (es. AWS, Microsoft) presentano tempi di andata e ritorno (*Round Trip Time* - RTT) molto bassi e stabili. Se un host viene compromesso e inizia a comunicare con un server C2 remoto (es. in Asia o Est Europa) o incanala il traffico attraverso reti di anonimato come Tor, la latenza subirà un drastico e inspiegabile aumento dovuto all'instradamento fisico.
-  * **Implementazione Tecnica:** Il NIDS calcola passivamente la latenza di rete durante il *3-way handshake* TCP. Il sistema estrae la Mediana oraria della latenza per le connessioni in uscita e la confronta con la *baseline* storica di latenza dell'host.
-  * **Formalizzazione:** Sia $L$ la latenza mediana (in millisecondi) calcolata sui flussi in uscita dell'host nell'ora corrente. Definiamo $M$ come la mediana storica della latenza (calcolata sui 7 giorni precedenti) e $MAD$ la sua dispersione assoluta. Lo scostamento standardizzato (Z-Score robusto) viene calcolato come:
+    $$Z_{robusto} > 3 \implies M_{arp} = 1$$
 
-    $$Z = \frac{|L - M|}{MAD}$$
+### 15. RTT Latency / Hidden routing ($M_{rtt}$)
 
-    Se la latenza subisce un netto deterioramento direzionale, concretizzandosi in uno scostamento statisticamente eccezionale ($Z > 3$) con $L \gg M$, si certifica la presenza di un routing anomalo, attivando la metrica: $M_{rtt} = 1$.
+* **Obiettivo:** Individuare l'uso di instradamenti di rete anomali o nascosti, come connessioni verso server di comando e controllo remoti o l'utilizzo di reti anonime esempio Tor). Le normali comunicazioni aziendali (come quelle verso i classici servizi cloud) sono caratterizzate da tempi di risposta (RTT) molto bassi e stabili. Se un computer viene compromesso e inizia a inviare dati verso server malevoli situati dall'altra parte del mondo, o attraverso percorsi crittografati complessi, la latenza subirà un aumento ingiustificato.
+* **Metodologia di estrazione:** La misurazione delle tempistiche è affidata a **ntopng**, che calcola passivamente la latenza di rete osservando lo scambio iniziale dei pacchetti (*3-way handshake* di TCP) senza rallentare il traffico. Alla chiusura di ogni finestra oraria, lo strumento estrae il valore mediano della latenza per tutte le connessioni generate verso l'esterno. Questo dato viene poi confrontato con la baseline dell'host.
+* **Modello matematico:** Sia $L$ la latenza mediana (espressa in millisecondi) calcolata sui flussi in uscita dell'host nell'ora corrente. Il sistema calcola lo scostamento statistico standardizzato (Z-Score robusto) confrontando la latenza attuale ($L$) con la mediana ($M$) e la dispersione assoluta ($MAD$) storiche (registrate nei 7 giorni precedenti):
+
+    $$Z_{robusto} = \frac{|L - M|}{MAD}$$
+
+    Affinché la metrica si attivi, il deterioramento delle prestazioni deve essere direzionale ed eccezionale: la latenza attuale deve essere maggiore di quella storica ($L > M$) e lo scostamento deve superare la soglia di tolleranza ($Z_{robusto} > 3$). Verificate queste condizioni, si certifica il routing anomalo:
+
+    $$Z_{robusto} > 3 \land L > M \implies M_{rtt} = 1$$
 
 ---
 
