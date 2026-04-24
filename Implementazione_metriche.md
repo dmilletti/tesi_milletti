@@ -1,108 +1,44 @@
-# Implementazione delle metriche
+# Scelta delle metriche e architettura del sistema
 
-Questo capitolo descrive l'implementazione pratica di un sottoinsieme selezionato delle metriche proposte nel modello generale. Abbiamo scelto di concentrarci su queste 10 metriche specifiche per trovare il giusto compromesso tra una visione completa delle anomalie di rete e l'efficienza computazionale.
+Questo capitolo illustra la transizione dal modello teorico all'implementazione pratica del sistema di rilevamento all'interno di una di rete reale. L'obiettivo è definire un'architettura in grado di unire la velocità della *Deep Packet Inspection* di **ntopng** e del motore **nDPI** con l'efficienza di archiviazione del database colonnare **ClickHouse**, che si conclude in un motore di calcolo in grado di assegnare un punteggio di rischio a ogni host. Prima di descrivere l'architettura del sistema è necessario definire quali metriche sono state scelte per l'implementazione pratica.
+
+## 1. Selezione delle metriche
+
+Abbiamo scelto di concentrarci su 10 metriche specifiche per trovare il giusto compromesso tra una visione completa delle anomalie di rete e l'efficienza computazionale.
 
 La selezione è stata guidata da due criteri fondamentali:
 
 1. **Efficienza computazionale su ClickHouse e nDPI:**  
 Sono state privilegiate le metriche che riescono a sfruttare al massimo le capacità di aggregazione nativa del database colonnare di ClickHouse, evitando operazioni troppo costose. Ad esempio, per rilevare i domini generati artificialmente (DGA), si è scelto di implementare il *Connection failure rate* ($M_{fail}$) al posto del calcolo logaritmico dell'entropia di Shannon applicato alle query DNS ($M_{DNS}$). Questo permette di ottenere lo stesso risultato (scoprire la ricerca alla cieca del malware) con interrogazioni SQL dal costo quasi nullo.
 2. **Copertura integrale della *Cyber Kill Chain*:**  
-Nonostante la riduzione numerica, il sottoinsieme è stato accuratamente bilanciato per intercettare un attacco in ogni singola fase del suo ciclo:
-   * **Command and Control (C2):** coperti intercettando il traffico verso host malevoli ($M_{rep}$) e infrastrutture crittografiche sospette ($M_{cert}$).
-   * **Evasione e offuscamento:** smascherati analizzando il fingerprinting del software ($M_{ja4}$), l'aggiramento del parametro SNI ($M_{sni}$) e l'incapsulamento su porte non standard ($M_{proto}$).
-   * **Ricognizione e lateral movement:** intercettati bloccando le scansioni interne ($M_{scan}$), le tempeste ARP ($M_{arp}$) e l'apertura di porte non autorizzate ($M_{srv}$).
-   * **Esfiltrazione e DGA:** rilevati monitorando le anomalie volumetriche in uscita ($M_{vol}$) e gli errori di connessione ($M_{fail}$).
+Il sottoinsieme è stato bilanciato per intercettare ogni fase di un attacco, dal primo contatto col server di controllo (C2) fino all'esfiltrazione finale dei dati.
 
-Di seguito viene descritto come ciascuna di queste metriche viene estratta dai flussi di rete e come viene analizzata.
+Il sottoinsieme delle metriche selezionate per l'implementazione è il seguente:
 
----
+1. **Destination reputation** ($M_{rep}$)
+2. **Client fingerprinting** ($M_{ja4}$)
+3. **TLS Certificate anomalies** ($M_{cert}$)
+4. **SNI Evasion** ($M_{sni}$)
+5. **Server role detection** ($M_{srv}$)
+6. **Non-standard Port/Protocol** ($M_{proto}$)
+7. **Internal scanning/Fan-out** ($M_{scan}$)
+8. **Asimmetria volumetrica in uscita** ($M_{vol}$)
+9. **Connection failure rate** ($M_{fail}$)
+10. **ARP Storm** ($M_{arp}$)
+  
+## 2. Architettura software e integrazione con ntopng  
 
-### Metrica 1: Destination reputation ($M_{rep}$)
+L'obiettivo del sistema è centralizzare tutta l'analisi all'interno di **ntopng**, trasformandolo nella vera e propria centrale operativa. In questo modo, ntopng non si limita a raccogliere i dati, ma analizza tutte le metriche (sia quelle native che quelle custum) per dare immediatamente il risultato finale.
 
-**1. Il modello matematico**  
-La logica di questa metrica deterministica si basa sulla teoria degli insiemi:
+### 2.1 Archiviazione su ClickHouse  
+Anche se l'analisi avviene dentro ntopng, il database **ClickHouse** rimane fondamentale. Serve per salvare la memoria storica del sistema, ntopng scrive lì ogni singola connessione e ogni allarme che è scattato. Questo è indispensabile per le metriche custum, perché ci permette di confrontare quello che succede adesso, con quello che è successo negli ultimi 7 giorni.
 
-$$d \in \mathcal{B} \lor q \in \mathcal{B} \implies M_{rep} = 1$$
+### 2.2 Integrazione delle metriche in ntopng  
+Tutte le 10 metriche si trovano all'interno di ntopng, ma vengono gestite in due modi diversi:
 
-Dove $d$ rappresenta l'indirizzo IP di destinazione della connessione, $q$ il dominio interrogato a livello applicativo e $\mathcal{B}$ l'insieme dinamico degli indicatori di compromissione (IoC), ovvero le *blacklist* di domini e IP noti per essere malevoli.
+* **Metriche native (8):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
+* **Metriche custum (2):** Per l'**Asimmetria volumetrica** e il **Connection Failure Rate**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
 
-**2. Il motore di estrazione e rilevamento in tempo reale (nDPI)**  
-L'estrazione dei parametri e l'appertenenza ai domini malevoli in tempo reale avvengono tramite **nDPI**, il motore di *Deep Packet Inspection* integrato in ntopng. Poiché il sistema deve analizzare il traffico in modo istantaneo, nDPI utilizza algoritmi avanzati di pattern matching:
-
-* **Valutazione dell'indirizzo IP ($d \in \mathcal{B}$):**  
-    Il sistema legge l'indirizzo IP di destinazione direttamente dall'intestazione del pacchetto (L3). Per verificare istantaneamente se questo IP è presente in una lista di indirizzi malevoli, nDPI utilizza strutture dati come **Patricia Trie** o **Radix Tree**. Questa struttura dati ad albero permette di cercare l'IP, garantendo tempi di ricerca in $O(k)$, dove $k$ è la lunghezza dell'indirizzo indipendente dalla dimensione totale della *blacklist*.
-
-* **Valutazione del nome a dominio ($q \in \mathcal{B}$):**  
-    Se la connessione è in chiaro (DNS sulla porta 53), nDPI isola il campo testo interrogato. Se la connessione è cifrata (HTTPS), nDPI intercetta il primo pacchetto inviato dal client (*TLS Client hello*) ed estrae l'estensione **SNI (Server Name Indication)**, ricavando il nome del server prima che la cifratura venga applicata al canale.
-    Per confrontare in tempo reale queste stringhe con le *blacklist* di domini (algoritmi DGA, phishing, server C2), nDPI utilizza l'algoritmo di **Aho-corasick**. Si tratta di un algoritmo basato su un'automa a stati finiti che permette di cercare più stringhe simultaneamente all'interno del pacchetto, leggendo il payload di rete una sola volta. Questo garantisce che la "Deep Packet Inspection" (DPI) non crei colli di bottiglia o rallentamenti sulla rete.
-
-**3. Implementazione operativa e dello storico (ClickHouse)**  
-I risultati di questa ispezione in tempo reale vengono salvati all'interno del database colonnare **ClickHouse** e poi analizzati ed estratti facendo delle query.
-
----
-
-### Metrica 2: Client fingerprinting ($M_{ja4}$)
-
-**1. Il modello matematico**  
-Questa metrica si concentra sull'identità del software che genera il traffico. Ogni applicazione (un browser, uno script Python o un malware) negozia le connessioni cifrate in modo unico.
-La logica matematica esprime questa verifica di identità:
-
-$$j \in \mathcal{J} \implies M_{ja4} = 1$$
-
-In questa formula, $j$ rappresenta l'impronta digitale (**JA4**) calcolata per l'host monitorato, mentre $\mathcal{J}$ è l'insieme delle firme associate a software malevoli o non autorizzati. Se l'impronta del software appartiene all'elenco delle firme malevole, la metrica scatta.
-
-**2. Il motore di estrazione e rilevamento in tempo reale (nDPI)**  
-Non potendo leggere il contenuto del traffico (che è cifrato), nDPI analizza il modo in cui il client si presenta al server durante il **TLS Handshake**.
-
-* **L'analisi del "Client hello":**  
-  nDPI intercetta il pacchetto iniziale in cui il computer comunica al server quali versioni del protocollo supporta, quali algoritmi di cifratura e quali estensioni vuole utilizzare. Poiché l'ordine e la scelta di questi parametri sono specifici per ogni sviluppatore, nDPI li estrae per comporre l'impronta **JA4**.
-
-* **L'algoritmo di normalizzazione e hashing:**  
-  Per generare l'impronta $j$, nDPI non si limita a copiare i dati, ma applica una logica di **normalizzazione**. Gli algoritmi interni riordinano le liste di cifratura e le estensioni in ordine numerico: questo passaggio è fondamentale per evitare che un malware possa cambiare l'impronta semplicemente spostando l'ordine dei parametri. 
-  Una volta normalizzati, i dati vengono passati attraverso una funzione di **hashing** (SHA-256 troncato). Per confrontare il fingerprinting (stringhe alfanumeriche) con il database $\mathcal{J}$ dei malware in tempo reale, nDPI utilizza nuovamente una **macchina a stati finiti** ottimizzata per il confronto di firme fisse, garantendo che l'identificazione avvenga in pochi microsecondi senza rallentare la navigazione dell'utente.
-
-**3. Implementazione operativa e dello storico (ClickHouse)**  
-Una volta calcolata l'impronta JA4, ntopng la invia a **ClickHouse**, dove viene salvata in una colonna dedicata e poi in seguito estratti ed analizzati con delle query.
-
----
-
-### Metrica 3: TLS Certificate anomalies ($M_{cert}$)
-
-**1. Il modello matematico**  
-Un server sicuro deve presentare un il certificato valido e rilasciato da un'autorità riconosciuta.
-La formula matematica valuta lo stato di questo certificato $c$:
-
-$$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c) \implies M_{cert} = 1$$
-
-In breve: se l'ente che ha emesso il certificato non è nell'elenco di quelli fidati ($\mathcal{T}$), o se il server si è fatto il certificato da solo (*Self-signed*), o ancora se il certificato è scaduto o non ancora valido, la metrica segnala l'anomalia ($M_{cert} = 1$).
-
-**2. Il motore di estrazione e rilevamento (nDPI)**  
-Qui nDPI agisce durante la fase di negoziazione della connessione (Handshake TLS).
-
-* **L'estrazione del certificato X.509:**  
-    Durante lo scambio dei pacchetti iniziali, il server invia il proprio certificato in chiaro. nDPI intercetta questo passaggio ed esegue il parsing del certificato X.509. Senza dover decifrare i dati successivi, nDPI è in grado di leggere i campi fondamentali: chi ha emesso il certificato (*Issuer*), a chi è intestato (*Subject*) e le date di validità.
-* **La verifica di attendibilità:**  
-    Per capire se l'emittente è affidabile, ntopng carica in memoria una lista di *Certification Authority* (CA) globali. nDPI utilizza i suoi algoritmi di ricerca rapida per confrontare l'emittente del certificato appena visto con questa lista. Se non c'è corrispondenza, o se nDPI rileva che la firma del certificato appartiene al server stesso (auto-firmato), l'informazione viene immediatamente passata a ntopng per l'allerta.
-
-**3. Implementazione operativa e dello storico (ClickHouse)**  
-Tutti i dettagli tecnici del certificato vengono salvati da ntopng in ClickHous per permette di fare query molto utili per la sicurezza.
-
-### Metrica 4: Evasione SNI nel traffico cifrato ($M_{sni}$)
-
-**1. Il modello matematico**  
-Nella normale navigazione web, i browser legittimi includono sempre in chiaro il nome del sito di destinazione all'inizio del *TLS Handshake*. I software malevoli, al contrario, tentano ad omettere questa informazione per contattare il loro server di comando (C2) direttamente tramite indirizzo IP.
-La formula matematica è la seguente:
-
-$$SNI(f) = \emptyset \implies M_{sni} = 1$$
-
-Dove $f$ rappresenta un flusso di rete crittografato (TLS) in uscita verso un IP pubblico. La funzione $SNI(f)$ estrae la stringa del nome del server. Se questa operazione restituisce un insieme vuoto ($\emptyset$), il sistema certifica l'anomalia strutturale e fa scattare l'allarme.
-
-**2. Il motore di estrazione e rilevamento in tempo reale (nDPI)**  
-Il compito di nDPI è verificando che le regole strutturali del protocollo siano rispettate.
-* **L'ispezione sintattica:** Durante il *TLS Handshake* (prima che i dati vengano crittografati), nDPI analizza l'estensione del parametro SNI (*Server Name Indication*). Il motore esegue un controllo sintattico a basso costo computazionale: verifica semplicemente se il campo `tls.sni` è popolato con un dominio valido.
-* **Resistenza ai nuovi protocolli:** Questo approccio si rivela estremamente robusto anche contro i malware più evoluti. Anche qualora un attaccante cercasse di sfruttare i nuovi standard di cifratura che nascondono l'SNI (come la tecnologia ECH - *Encrypted Client Hello*), la struttura esterna del pacchetto di rete deve comunque rispettare regole rigide. Se nDPI intercetta una connessione in cui tale campo risulta del tutto assente, rileva immediatamente l'anomalia.
-
-**3. Implementazione operativa e dello storico (ClickHouse)**  
-A livello di database, questa metrica rappresenta una delle interrogazioni più leggere ed efficienti in assoluto per **ClickHouse**. La query SQL si limita a verificare se il valore del SNI è presente all'interno della colonna e segnalare l'anomalia nel caso sia assente.
-
----
+### 2.3 Valutazione della sicurezza degli host e della rete  
+L'ultimo passaggio è il calcolo dello **Score Globale**, che avviene anch'esso dentro ntopng. Il sistema somma i pesi di tutte le metriche attive per ogni host della rete e mostra il risultato finale direttamente nell'interfaccia web di ntopng. 
+In questo modo, chi controlla la rete può vedere subito la lista degli host e il loro score, sapendo che quel punteggio tiene conto sia delle minacce standard che dei calcoli statistici ricavati utilizzando la baseline.
