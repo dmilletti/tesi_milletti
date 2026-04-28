@@ -88,8 +88,8 @@ Ad esempio, quando lo script deve calcolare la metrica dell'*asimmetria volumetr
 ### 2.2 Integrazione delle metriche in ntopng  
 Tutte le 10 metriche si trovano all'interno di ntopng, ma vengono gestite in due modi diversi:
 
-* **Metriche native (8):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
-* **Metriche custum (2):** Per l'**Asimmetria volumetrica** e il **Connection Failure Rate**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
+* **Metriche native (7):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
+* **Metriche custum (3):** Per l'**Asimmetria volumetrica**, **Connection failure rate** e **Internal scanning**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
 
 ### 2.3 Ricalibrazione dei punteggi
 Un aspetto critico dell'architettura riguarda la gestione e l'assegnazione dei pesi delle anomalie. ntopng utilizza un approccio di calcolo del rischio (*Risk-based scoring approach*) cumulativo e teoricamente illimitato, a ogni evento anomalo viene sommato un punteggio predefinito (es. +210 punti per *Malicious flow detection*), portando l'indicatore di un host compromesso a superare facilmente le migliaia di punti.
