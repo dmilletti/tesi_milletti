@@ -26,6 +26,54 @@ Il sottoinsieme delle metriche selezionate per l'implementazione è il seguente:
 8. **Asimmetria volumetrica in uscita** ($M_{vol}$)
 9. **Connection failure rate** ($M_{fail}$)
 10. **ARP Storm** ($M_{arp}$)
+
+Prima di passare all'implementazione vera e propria delle metriche, andiamo a vedere alcuni scenari dove dimostriamo che le metriche scelte sono ideali per coprire la maggior parte dello specchio delle anomalie di rete.
+
+### Scenario 1: Attacco ransomware e lateral movements
+
+Immaginiamo che un dipendente riceva un'email di phishing e clicchi su un link malevolo, provocando involontariamente lo scaricamento di un malware sul proprio PC. Il malware non cifra subito i dati, ma prima cerca di capire dove si trova e se può infettare altri computer nella rete aziendale per massimizzare il danno.
+
+Come le nostre metriche rilevano l'attacco:
+
+1.  **Fase di Contatto (C&C):** Il malware prova a collegarsi al server dell'hacker per ricevere istruzioni. 
+    * **$M_{rep}$ (Destination reputation):** Scatta subito se l'IP di destinazione è già noto nelle blacklist.
+    * **$M_{cert}$ (TLS certificate anomalies):** Se l'hacker usa un server con un certificato auto-firmato per risparmiare, la metrica lo segnala immediatamente.
+2.  **Fase di esplorazione (Reconnaissance):** Il malware inizia a scansionare la rete locale per trovare server con dati sensibili.
+    * **$M_{arp}$ (ARP Storm):** Il PC infetto invia tante richieste ARP per mappare tutti i dispositivi fisici vicini. È un comportamento tipico dei ransomware che ntopng rileva immediatamente.
+    * **$M_{scan}$ (Internal scanning):** Una volta individuati gli IP, il malware scansiona le porte. La nostra metrica rileva l'alto numero di connessioni verso host interni diversi (Fan out).
+3.  **Fase di Preparazione:** Il malware apre una *Backdoor* per permettere all'hacker di entrare nel sistema.
+    * **$M_{srv}$ (Server Role):** Il PC del dipendente, che è sempre stato un semplice client, inizia improvvisamente ad accettare connessioni dall'esterno. ntopng rileva l'inversione di ruolo e fa scattare l'allarme.
+
+Quindi anche se il malware cercasse di mimetizzarsi, la combinazione di queste 5 metriche porterebbe lo **Score globale** a 100 in pochi minuti, permettendo all'amministratore di isolare il PC prima che inizi la cifratura dei file.
+
+### Scenario 2: Esfiltrazione e tunneling
+
+Immaginiamo un utente malintenzionato che ha già guadagnato l'accesso a un server interno. Il suo obiettivo è rubare l'intero database clienti, ma sa bene che un trasferimento di massa su porte non autorizzate farebbe scattare subito l'allarme. Per questo motivo, cerca di nascondere le proprie tracce mascherando il furto. Incapsula i dati in un tunnel cifrato (es. SSH) e lo fa passare sulla porta 443, sperando che il firewall lo scambi per normale traffico HTTPS verso un sito web innocuo.
+
+Come le nostre metriche smascherano l'attacco:
+
+1.  **Fase di evasione (Offuscamento del traffico):** L'attaccante cerca di aggirare i controlli perimetrali.
+    * **$M_{sni}$ (SNI Evasion):** Per evitare di dover registrare un dominio falso (che potrebbe finire in *blacklist*), l'attaccante configura il suo strumento per contattare il server remoto direttamente tramite indirizzo IP. Il motore nDPI analizza l'handshake crittografico iniziale, nota che il campo testuale del dominio (SNI) è completamente assente e fa scattare l'allarme di evasione.
+    * **$M_{proto}$ (Non-standard Port/Protocol):** Il firewall perimetrale vede traffico sulla porta 443 e lo lascia passare credendolo traffico web (HTTPS). Tuttavia, la *Deep Packet Inspection* di nDPI analizza il pacchetto e riconosce la firma di un protocollo remoto (es. SSH o RDP) nascosto al suo interno, segnalando immediatamente l'anomalia strutturale.
+2.  **Fase di esfiltrazione :** L'attaccante avvia il trasferimento del database compresso verso l'esterno.
+    * **$M_{vol}$ (Asimmetria volumetrica):** L'host monitorato ha uno storico settimanale (*baseline*) in cui scarica molti dati e ne carica pochissimi. Improvvisamente, il rapporto si inverte, inizia a inviare svariati gigabyte verso l'esterno in una sola ora. Lo script statistico interroga **ClickHouse**, calcola la deviazione standard ($Z_{robusto}$) e, rilevando uno scostamento eccezionale dalla mediana storica, attiva la metrica di esfiltrazione.
+
+In questo scenario, non c'è nessun malware rumoroso. Nonostante ciò, il tentativo di nascondersi ha generato due anomalie specifiche. Il motore di scoring riceve l'allerta da nDPI (SNI Evasion) e da ClickHouse (Asimmetria volumetrica), portando l'host in zona di allerta.
+
+### Scenario 3: Botnet e DGA (Domain generation algorithms)
+
+Immaginiamo che un computer aziendale è stato silenziato e inglobato in una *Botnet*. Per ricevere i comandi dall'hacker senza farsi bloccare dalle liste nere dei firewall tradizionali, il malware utilizza un algoritmo DGA. Genera centinaia di domini casuali al minuto (es. `xkjdfgh.com`, `qweerty.net`) e tenta di contattarli tutti in sequenza, sapendo che l'hacker ne ha registrato e attivato solo uno. 
+
+Come le nostre metriche scoprono l'attacco:
+
+1.  **Fase di ricerca (Punto debole del DGA):** Il malware inizia a interrogare i server DNS e a tentare connessioni verso domini inventati.
+    * **$M_{fail}$ (Connection failure rate):** Poiché quasi tutti i domini generati non esistono, il server DNS risponderà continuamente con errori `NXDOMAIN`, o i pacchetti andranno in Timeout/RST. La nostra metrica statistica interroga **ClickHouse** e nota che il tasso di fallimento delle connessioni di quell'host, storicamente fermo al 2%, è improvvisamente schizzato al 95%. L'elevato Z-Score fa scattare l'allarme. Questa metrica ci permette di rilevare il DGA a costo quasi nullo, senza dover calcolare pesanti indici di entropia testuale sulle singole stringhe DNS.
+2.  **Fase di identificazione (Fingerprinting):** Nonostante i fallimenti, il malware tenta di usare il protocollo HTTPS per nascondere il contenuto delle sue richieste.
+    * **$M_{ja4}$ (Client Fingerprinting):** Indipendentemente da quale dominio casuale il malware stia cercando di contattare, **nDPI** intercetta il *TLS Client Hello* e calcola il fingerprinting del software che sta generando il traffico. Questa impronta JA4 viene confrontata con il nostro database e risulta appartenere a una nota botnet. 
+
+L'unione di un'anomalia puramente statistica (Connection failure rate) e di una firma (Client fingerprinting) certifica la compromissione. Lo *Score* dell'host raggiunge il livello critico e l'amministratore riceve la segnalazione.
+
+---
   
 ## 2. Architettura software e integrazione con ntopng  
 
