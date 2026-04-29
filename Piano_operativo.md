@@ -35,7 +35,7 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 
     $$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c) \implies M_{cert} = 1$$
 
-### 4. Evasione SNI nel Traffico Cifrato ($M_{sni}$)
+### 4. SNI Evasion ($M_{sni}$)
 
 * **Obiettivo:** Rilevare tentativi di mascheramento delle comunicazioni verso l'esterno, verificando la presenza del parametro SNI (Server Name Indication) nelle connessioni cifrate. Poiché i browser e le applicazioni legittime includono sempre il nome del sito di destinazione in chiaro durante la connessione iniziale, l'assenza volontaria di questo dato (ad esempio, quando un malware tenta di contattare direttamente un indirizzo IP numerico per nascondersi) rivela un'evidente anomalia strutturale, tipica di script malevoli o strumenti di hacking.
 * **Metodologia di estrazione:** L'ispezione viene affidata a **ntopng**, che monitora passivamente il traffico di rete in uscita. Durante l'handshake del protocollo TLS (ovvero l'istante in cui client e server si accordano prima di cifrare i dati), lo strumento analizza l'estensione dedicata all'SNI. ntopng verifica in tempo reale se il campo `tls.sni` risulta popolato con un nome a dominio valido, intercettando immediatamente le connessioni in cui tale campo risulta completamente vuoto o mancante.
@@ -59,19 +59,20 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 * **Obiettivo**: Rilevare i tentativi di aggirare i sistemi di sicurezza (come i classici firewall) nascondendo traffico non autorizzato all'interno di canali solitamente considerati sicuri e lasciati aperti. Poiché le reti bloccano le porte non necessarie, gli attaccanti spesso incanalano traffico sospetto, come connessioni per il controllo remoto (SSH) o tunnel VPN su porte tipicamente riservate alla normale navigazione web (come la porta 80 o 443), sperando di passare inosservati.
 * **Metodologia di estrazione**: L'analisi viene affidata alla *Deep Packet Inspection* (DPI) di **ntopng**. Invece di fidarsi del semplice numero di porta utilizzato per la connessione (che è facilmente falsificabile a livello superficiale), ntopng analizza la struttura interna del pacchetto di rete per identificare con certezza il vero protocollo in uso. Successivamente, lo strumento confronta il protocollo reale appena scoperto con lo standard internazionale atteso per quella specifica porta di destinazione.
 * **Modello matematico**: Sia $p$ la porta di destinazione utilizzata da un flusso di rete e sia $\mathcal{M}(p)$ la regola che definisce quale protocollo ci si aspetta normalmente su quella porta (ad esempio, $\mathcal{M}(443) = \text{TLS}$). Definiamo $L7_{DPI}$ come il protocollo reale identificato da ntopng analizzando l'interno del pacchetto. Se l'analizzatore identifica un protocollo che è differente da quello atteso, la metrica si attiva per segnalare il mascheramento:
+
     $$L7_{DPI} \neq \mathcal{M}(p) \implies M_{proto} = 1$$
 
 ### 7. Internal scanning / Fan-out ($M_{scan}$)
 
-* **Obiettivo:** Rilevare tentativi di esplorazione non autorizzata all'interno della rete locale, come le scansioni automatizzate o i movimenti laterali di un malware. Di norma, un computer aziendale comunica con un numero limitato e stabile di dispositivi interni (come file server o stampanti). Un improvviso e massiccio aumento del numero di dispositivi diversi contattati nell'arco di un'ora (Fan-out) è un forte indicatore che un'infezione sta cercando nuove macchine vulnerabili a cui propagarsi.
-* **Metodologia di estrazione:** L'elaborazione è affidata a **ntopng**, che raccoglie e aggrega i log di traffico (come i flussi NetFlow) allo scadere di ogni finestra oraria. Il sistema filtra i dati trattenendo solo le connessioni in cui l'host monitorato avvia la comunicazione (*Originator*) verso indirizzi IP appartenenti esclusivamente alla rete interna. Da questo filtro, ntopng estrae e conta il numero esatto di indirizzi IP unici contattati nell'ultima ora.
-* **Modello matematico:** Definiamo $D_{int}$ come l'insieme degli indirizzi IP interni unici contattati dall'host $h$ nell'ora corrente $t$. La variabile che misuriamo è la quantità di questi IP, ovvero la cardinalità dell'insieme: $x_t = |D_{int}|$. Per capire se questo numero è anomalo, il sistema calcola lo scostamento statistico standardizzato (Z-Score robusto), confrontando il valore attuale ($x_t$) con la mediana ($\tilde{x}$) e la dispersione assoluta ($MAD$) registrate dall'host negli ultimi 7 giorni:
+* **Obiettivo:** Rilevare tentativi di esplorazione non autorizzata all'interno della rete locale, come le scansioni automatizzate o i movimenti laterali di un malware. Di norma, un computer aziendale comunica con un numero limitato e stabile di dispositivi interni (come file server o stampanti). Un improvviso e massiccio aumento del numero di dispositivi diversi contattati nell'arco di un'ora è un forte indicatore che un'infezione sta cercando nuove macchine vulnerabili a cui propagarsi.
+* **Metodologia di estrazione:** La metrica viene gestita nativamente da **ntopng** tramite i suoi motori di analisi comportamentale (*Behavioural checks*). ntopng analizza in tempo reale i flussi di rete e, grazie agli algoritmi di *network discovery*, è in grado di identificare se un host sta tentando di mappare la rete interna. Nello specifico, il sistema monitora il numero di connessioni uniche verso IP interni e la velocità con cui vengono effettuate, innescando allarmi specifici come `Scan`, `SYN Scan` o `Network discovery`.
+* **Modello matematico:** Definiamo $A_{scan}$ come l'insieme degli allarmi nativi di ntopng legati alle attività di scanning della rete. La metrica si attiva se viene registrato almeno un evento di questo tipo per l'host monitorato nell'intervallo di tempo (1 ora):
 
-    $$Z_{robusto} = \frac{|x_t - \tilde{x}|}{MAD}$$
+    $$A_{scan} \in \{\text{Scan, Network discovery, SYN Scan}\}$$
 
-    Se il risultato evidenzia un picco lontano dalla norma ($Z_{robusto} > 3$), l'anomalia viene confermata e la metrica si attiva:
-  
-    $$Z_{robusto} > 3 \implies M_{scan} = 1$$
+    Se ntopng rileva l'anomalia comportamentale, la metrica si attiva:
+
+    $$A_{scan} = \text{True} \implies M_{scan} = 1$$
 
 ### 8. Novel protocol detection ($M_{new}$)
 
@@ -159,7 +160,7 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 
 ### 14. ARP Storm ($M_{arp}$)
 
-* **Obiettivo:** Individuare le fasi preparatorie di un attacco *ransomware* o l'espansione di un *worm* all'interno della rete locale. Prima di poter infettare altri dispositivi, questi malware di solito devono mappare l'ambiente circostante: per farlo, inviano una "tempesta" di richieste ARP (**ARP Storm**) per scoprire gli indirizzi fisici (MAC address) di tutti i computer collegati alla stessa rete. Questo comportamento esplorativo, massiccio e molto rapido, è totalmente sconosciuto alla normale operatività di un computer aziendale.
+* **Obiettivo:** Individuare le fasi preparatorie di un attacco *ransomware* o l'espansione di un *worm* all'interno della rete locale. Prima di poter infettare altri dispositivi, questi malware di solito devono mappare l'ambiente circostante. Per farlo, inviano una "tempesta" di richieste ARP (**ARP Storm**) per scoprire gli indirizzi fisici (MAC address) di tutti i computer collegati alla stessa rete. Questo comportamento esplorativo, massiccio e molto rapido, è totalmente sconosciuto alla normale operatività di un computer aziendale.
 * **Metodologia di estrazione:** Il monitoraggio di queste comunicazioni basilari è affidato a **ntopng**, che analizza il traffico al livello più basso della rete locale (L2). ntopng intercetta e somma tutte le singole interrogazioni ARP (messaggi del tipo: "Chi ha questo indirizzo IP?") generate dal computer monitorato allo scadere della finestra oraria. Questo volume totale viene poi messo a confronto con le abitudini storiche del dispositivo.
 * **Modello matematico:** Sia $A_t$ il numero totale di richieste ARP inviate dal dispositivo $h$ nell'ora in corso $t$. Il sistema determina l'anomalia calcolando lo scostamento statistico standardizzato (Z-Score robusto), confrontando il volume attuale ($A_t$) con la mediana ($\tilde{A}$) e la dispersione assoluta ($MAD$) del traffico ARP storico del nodo (profilo a 7 giorni):
 
@@ -267,7 +268,7 @@ Basandoci sulla dispersione dei dati MAD, sappiamo che la normalità si distribu
 * Uno Z-Score pari a **2** copre circa il **95%** delle attività regolari.
 * Uno Z-Score pari a **3** ingloba il **99.7%** dei comportamenti ordinari dell'host.
 
-Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire falsi allarmi (Alter Fatigue).
+Scegliere di attivare le metriche di allarme solo quando $Z_{robusto} > 3$ significa matematicamente che un evento ha meno dello **0.3%** di probabilità di essere un comportamento regolare casuale. Questa soglia è fondamentale in ambito *Cybersecurity* per abbattere drasticamente i falsi positivi e prevenire falsi allarmi (Alert Fatigue).
 * **La finestra di osservazione (batch di 1 ora):** Le metriche statistiche richiedono l'accumulo di un set di dati sufficiente per calcolare indicatori validi. Il sistema utilizza una finestra di osservazione di **1 ora**, una scelta che rappresenta il miglior compromesso tecnico:
 * **Contro delle analisi troppo brevi (es. 5 minuti):** Finestre troppo brevi sono sensibili a picchi istantanei legittimi, come il download di un file, che invaliderebbero la statistica generando allarmi inutili.
 * **Contro delle analisi troppo lunghe (es. 24 ore):** Un'osservazione giornaliera creerebbe distribuzioni statisticamente perfette, ma risulterebbe totalmente inutile per la neutralizzazione degli attacchi (*Incident Response*). La finestra oraria bilancia perfettamente il rigore matematico e i tempi di reazione necessari per difendere la rete.
