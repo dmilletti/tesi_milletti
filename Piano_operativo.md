@@ -14,34 +14,50 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 ### 1. Destination reputation ($M_{rep}$)
 
 * **Obiettivo:** Monitorare e validare il grado di affidabilità degli endpoint esterni con cui gli host della rete interna tentano di stabilire una connessione. L'identificazione di comunicazioni verso nodi già censiti come malevoli (ad esempio server di Command & Control, nodi di uscita Tor o domini di phishing) permette di rilevare tempestivamente uno stato di compromissione, prevenendo attività di esfiltrazione dati o persistenza dell'attacco.
-* **Metodologia di estrazione:** La raccolta dei dati viene effettuata tramite **ntopng**, configurato come sonda di monitoraggio passivo del traffico di rete. Lo strumento analizza in tempo reale i flussi NetFlow/IPFIX per estrarre gli indirizzi IP di destinazione e ispeziona il traffico DNS per ricavare i nomi di dominio (FQDN). Questi metadati vengono confrontati automaticamente con feed di *threat intelligence* e *blacklist* integrate nativamente o caricate esternamente nel sistema.
-* **Modello matematico:** Sia $\mathcal{B}$ l'insieme dinamico degli Indicatori di Compromissione (IoC) aggiornati. Se per un dato host $h$, l'indirizzo IP di destinazione $d$ o il dominio richiesto $q$ appartengono all'insieme malevolo, la metrica viene attivata:
+* **Metodologia di estrazione:** La raccolta dei dati viene effettuata tramite **ntopng**, configurato come sonda di monitoraggio passivo del traffico di rete. Lo strumento analizza in tempo reale i flussi NetFlow/IPFIX per estrarre gli indirizzi IP di destinazione e ispeziona il traffico DNS per ricavare i nomi di dominio (FQDN). Questi metadati vengono confrontati automaticamente con feed di *threat intelligence* e *blacklist* integrate nativamente. Se viene rilevato un riscontro positivo, ntopng genera immediatamente allarmi di sicurezza specifici, come `Blacklisted Client Contact`, `Blacklisted Flow` e `Blacklisted Server Contact`.
+* **Modello matematico:** Definiamo $A_{rep}$ come l'insieme degli allarmi nativi generati da ntopng a seguito di un contatto con una destinazione classificata come malevola. La metrica si attiva se viene registrato almeno un evento di questo tipo per l'host monitorato:
 
-    $$d \in \mathcal{B} \lor q \in \mathcal{B} \implies M_{rep} = 1$$
+    $$A_{rep} \in \{\text{Blacklisted Client Contact, Blacklisted Flow, Blacklisted Server Contact}\}$$
+
+    Se il sistema registra questo evento di rete per l'host $h$, l'anomalia viene confermata e la metrica corrispondente scatta a 1:
+
+    $$A_{rep} = \text{True} \implies M_{rep} = 1$$
 
 ### 2. Client Fingerprinting ($M_{ja4}$)
 
 * **Obiettivo:** Identificare e classificare la natura del software che genera traffico di rete analizzando il suo fingerprinting durante la negoziazione dei protocolli cifrati (TLS). Poiché ogni applicazione (sia un browser legittimo o un malware) negozia la connessione in modo unico, questa metrica permette di distinguere strumenti autorizzati da software malevoli o non autorizzati, indipendentemente dalla destinazione contattata.
-* **Metodologia di estrazione:** L'estrazione dei dati avviene tramite **ntopng**, che agisce ispezionando la fase iniziale della connessione cifrata, nota come *TLS Client Hello*. **ntopng** analizza i parametri in chiaro inviati dal client (algoritmi supportati, versioni del protocollo ed estensioni) e calcola l'impronta **JA4**, una stringa modulare che rappresenta univocamente il comportamento del software di rete. Questa firma viene poi confrontata in tempo reale con database di *Threat Intelligence* che catalogano le impronte associate a strumenti d'attacco noti, come Cobalt Strike o Metasploit.
-* **Modello matematico:** Sia $\mathcal{J}$ l'insieme delle impronte JA4 classificate come malevole o sospette dalle fonti di intelligence. Sia $j$ l'impronta specifica calcolata da ntopng per l'host monitorato $h$. Se l'impronta appartiene all'insieme delle firme note per essere pericolose, la metrica certifica l'uso di software non autorizzato:
+* **Metodologia di estrazione:** L'estrazione dei dati avviene tramite **ntopng**, che agisce ispezionando la fase iniziale della connessione cifrata, nota come *TLS Client Hello*. **ntopng** analizza i parametri in chiaro inviati dal client (algoritmi supportati, versioni del protocollo ed estensioni) e calcola l'impronta **JA4**, una stringa modulare che rappresenta univocamente il comportamento del software di rete. Questa firma viene poi confrontata in tempo reale con database di *Threat Intelligence* integrate in ntopng, che catalogano le impronte associate a strumenti d'attacco noti, come Cobalt Strike o Metasploit. In caso di corrispondenza, ntopng genera nativamente l'allarme specifico `Malicious Fingerprinting`.
+* **Modello matematico:** Definiamo $A_{ja4}$ come l'insieme degli allarmi nativi generati da ntopng a seguito del rilevamento di un'impronta TLS compromessa. 
+
+    $$A_{ja4} \in \{\text{Malicious Fingerprint}\}$$
+
+    Se il motore rileva l'utilizzo di un software malevolo da parte dell'host monitorato, l'evento viene registrato e la metrica si attiva:
   
-    $$j \in \mathcal{J} \implies M_{ja4} = 1$$
+    $$A_{ja4} = \text{True} \implies M_{ja4} = 1$$
 
 ### 3. TLS Certificate Anomalies ($M_{cert}$)
 
 * **Obiettivo:** Individuare canali di comunicazione potenzialmente pericolosi analizzando la validità e l'origine dei certificati crittografici utilizzati dai server esterni. Poiché gli attaccanti utilizzano spesso infrastrutture improvvisate con certificati auto-firmati, scaduti o emessi da autorità non riconosciute per risparmiare tempo o eludere i controlli, questa metrica funge da filtro critico per identificare server di Comando e Controllo (C2) o siti di phishing.
-* **Metodologia di estrazione:** L'analisi dei certificati viene effettuata tramite **ntopng**, che esegue una *Deep Packet Inspection* (DPI) durante lo scambio del pacchetto *TLS Certificate* nell'handshake. ntopng isola il certificato X.509 presentato dal server ed estrae automaticamente i metadati essenziali, tra cui l'autorità di certificazione emittente (Issuer), il soggetto (Subject) e le date di validità. Lo strumento verifica poi se l'ente emittente è presente nell'elenco delle autorità attendibili (Trust store) e se il certificato rispetta i vincoli temporali di validità.
-* **Modello matematico:** Sia $c$ il certificato TLS presentato dal server di destinazione. Definiamo $\mathcal{T}$ come l'insieme delle autorità di certificazione (CA) globalmente attendibili. La metrica valuta tre condizioni critiche: se l'emittente non è attendibile ( $Issuer(c) \notin \mathcal{T}$ ), se il certificato è auto-firmato ( $SelfSigned(c)$ ) o se è temporalmente non valido ( $Invalid(c)$ ). Se almeno una di queste condizioni è vera, la metrica si attiva:
+* **Metodologia di estrazione:** L'analisi dei certificati viene effettuata tramite **ntopng**, che esegue una *Deep Packet Inspection* (DPI) durante lo scambio del pacchetto *TLS Certificate* nell'handshake. ntopng isola il certificato X.509 presentato dal server ed estrae automaticamente i metadati essenziali, tra cui l'autorità di certificazione emittente (Issuer), il soggetto (Subject) e le date di validità. Se il certificato non supera i controlli (es. scaduto, auto-firmato, o con autorità emittente non attendibile), lo strumento genera allarmi di sicurezza come `TLS Cert Expired`, `TLS Cert Self-signed` o `TLS Cert Issues`.
+* **Modello matematico:** Definiamo $A_{cert}$ come l'insieme degli allarmi nativi generati da ntopng relativi alle compromissioni o anomalie dei certificati TLS:
 
-    $$Issuer(c) \notin \mathcal{T} \lor SelfSigned(c) \lor Invalid(c) \implies M_{cert} = 1$$
+    $$A_{cert} \in \{\text{TLS Cert Expired, TLS Cert Self-signed, TLS Cert Issues}\}$$
+
+    Se il sistema registra la presenza di almeno uno di questi allarmi durante la comunicazione dell'host monitorato, l'anomalia crittografica viene confermata e la metrica si attiva:
+
+    $$A_{cert} = \text{True} \implies M_{cert} = 1$$
 
 ### 4. SNI Evasion ($M_{sni}$)
 
 * **Obiettivo:** Rilevare tentativi di mascheramento delle comunicazioni verso l'esterno, verificando la presenza del parametro SNI (Server Name Indication) nelle connessioni cifrate. Poiché i browser e le applicazioni legittime includono sempre il nome del sito di destinazione in chiaro durante la connessione iniziale, l'assenza volontaria di questo dato (ad esempio, quando un malware tenta di contattare direttamente un indirizzo IP numerico per nascondersi) rivela un'evidente anomalia strutturale, tipica di script malevoli o strumenti di hacking.
-* **Metodologia di estrazione:** L'ispezione viene affidata a **ntopng**, che monitora passivamente il traffico di rete in uscita. Durante l'handshake del protocollo TLS (ovvero l'istante in cui client e server si accordano prima di cifrare i dati), lo strumento analizza l'estensione dedicata all'SNI. ntopng verifica in tempo reale se il campo `tls.sni` risulta popolato con un nome a dominio valido, intercettando immediatamente le connessioni in cui tale campo risulta completamente vuoto o mancante.
-* **Modello matematico:** Sia $f$ un flusso di rete crittografato (TLS) originato da un host $h$ verso un indirizzo IP pubblico. Definiamo la funzione $SNI(f)$ come l'operazione che estrae la stringa del SNI dal pacchetto analizzato. Se la funzione restituisce un valore vuoto, il sistema certifica un'evasione e attiva la penalità:
+* **Metodologia di estrazione:** L'ispezione viene affidata a **ntopng**, che monitora passivamente il traffico di rete in uscita. Durante l'handshake del protocollo TLS (ovvero l'istante in cui client e server si accordano prima di cifrare i dati), lo strumento analizza l'estensione dedicata all'SNI. Se il client cerca di instaurare una comunicazione cifrata omettendo tale parametro, ntopng intercetta immediatamente la violazione e genera un allarme chiamato `Missing SNI TLS Extn`.
+* **Modello matematico:** Definiamo $A_{sni}$ come l'insieme degli allarmi generati da ntopng riguardanti l'assenza del parametro SNI nel traffico cifrato:
 
-    $$SNI(f) = \emptyset \implies M_{sni} = 1$$
+    $$A_{sni} \in \{\text{Missing SNI TLS Extn}\}$$
+
+    Se il sistema registra la generazione di questo allarme per i flussi di rete originati dall'host monitorato, la metrica scatta:
+
+    $$A_{sni} = \text{True} \implies M_{sni} = 1$$
 
 ### 1.B Metriche statistiche e comportamentali (Finestra di 1 ora)
 Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zona grigia"**, ovvero quell'area del traffico di rete che non contiene minacce evidenti, ma che risulta sospetta perché si discosta dalle normali abitudini dell'host. Invece di cercare virus già noti, il sistema identifica la comparsa di attività totalmente inedite o cambiamenti insoliti nella quantità di dati scambiati. Il calcolo viene eseguito automaticamente ogni ora, confrontando i dati recenti con la sua *baseline*, costruita analizzando la sua attività negli ultimi **7 giorni**.
@@ -49,18 +65,26 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 ### 5. Server role detection ($M_{srv}$)
 
 * **Obiettivo**: Rilevare inversioni di ruolo sospette in cui un computer aziendale, che solitamente agisce come **client**, inizia improvvisamente ad accettare connessioni dall'esterno come se fosse un **server**. Questo cambio di comportamento è un segnale di allarme critico: indica spesso la presenza di una *backdoor* o il tentativo di un attaccante di muoversi lateralmente all'interno della rete dopo aver compromesso un nodo.
-* **Metodologia di estrazione**: Il monitoraggio viene effettuato tramite **ntopng**, che analizza la dinamica delle sessioni a livello di trasporto (TCP/UDP). Lo strumento osserva il modo in cui vengono stabiliti i flussi: se l'host monitorato risponde a chiamate in arrivo (ad esempio inviando un segnale di conferma `SYN-ACK` in risposta a una richiesta di connessione `SYN`), ntopng lo classifica come "Responder". Se ntopng registra anche una sola sessione stabilita con successo in cui l'host monitorato svolge il ruolo da **server**, l'evento viene segnalato come anomalia di ruolo.
-* **Modello matematico**: Sia $F$ l'insieme delle connessioni bidirezionali stabilite correttamente. Ogni connessione $f \in F$ è definita dalla coppia $(o, r)$, dove $o$ rappresenta chi inizia la comunicazione (*Originator*) e $r$ chi la riceve (*Responder*). Se per l'host monitorato $h$ viene individuato un flusso in cui esso agisce come ricevente (server), la metrica si attiva:
+* **Metodologia di estrazione**: Il monitoraggio viene effettuato tramite **ntopng**, che analizza la dinamica delle sessioni a livello di trasporto (TCP/UDP). Lo strumento osserva il modo in cui vengono stabiliti i flussi. Se l'host monitorato risponde a chiamate in arrivo (ad esempio inviando un segnale di conferma `SYN-ACK` in risposta a una richiesta di connessione `SYN`), ntopng lo classifica come "Responder". Al termine di un periodo di apprendimento (nativo di ntopng), se ntopng registra che l'host ha agito come Responder su una nuova porta, intercetta l'inversione di ruolo e genera automaticamente l'allarme `Server Port Detected`.
+* **Modello matematico**: Definiamo $A_{srv}$ come l'insieme degli allarmi nativi generati da ntopng a seguito dell'apertura di un servizio server anomalo:
 
-    $$h = r \implies M_{srv} = 1$$
+    $$A_{srv} \in \{\text{Server Port Detected}\}$$
+
+    Se il sistema registra questo tipo di evento per l'host monitorato, confermando che sta agendo da ricevente (Responder) in modo non previsto, la metrica si attiva:
+
+    $$A_{srv} = \text{True} \implies M_{srv} = 1$$
 
 ### 6. Non-standard Port/Protocol ($M_{proto}$)
 
 * **Obiettivo**: Rilevare i tentativi di aggirare i sistemi di sicurezza (come i classici firewall) nascondendo traffico non autorizzato all'interno di canali solitamente considerati sicuri e lasciati aperti. Poiché le reti bloccano le porte non necessarie, gli attaccanti spesso incanalano traffico sospetto, come connessioni per il controllo remoto (SSH) o tunnel VPN su porte tipicamente riservate alla normale navigazione web (come la porta 80 o 443), sperando di passare inosservati.
-* **Metodologia di estrazione**: L'analisi viene affidata alla *Deep Packet Inspection* (DPI) di **ntopng**. Invece di fidarsi del semplice numero di porta utilizzato per la connessione (che è facilmente falsificabile a livello superficiale), ntopng analizza la struttura interna del pacchetto di rete per identificare con certezza il vero protocollo in uso. Successivamente, lo strumento confronta il protocollo reale appena scoperto con lo standard internazionale atteso per quella specifica porta di destinazione.
-* **Modello matematico**: Sia $p$ la porta di destinazione utilizzata da un flusso di rete e sia $\mathcal{M}(p)$ la regola che definisce quale protocollo ci si aspetta normalmente su quella porta (ad esempio, $\mathcal{M}(443) = \text{TLS}$). Definiamo $L7_{DPI}$ come il protocollo reale identificato da ntopng analizzando l'interno del pacchetto. Se l'analizzatore identifica un protocollo che è differente da quello atteso, la metrica si attiva per segnalare il mascheramento:
+* **Metodologia di estrazione**: L'analisi viene affidata alla *Deep Packet Inspection* (DPI) di **ntopng**. Invece di fidarsi del semplice numero di porta utilizzato per la connessione (che è facilmente falsificabile), ntopng analizza la struttura interna del pacchetto di rete per identificare con certezza il vero protocollo in uso. Successivamente, lo strumento confronta il protocollo reale appena scoperto con lo standard internazionale atteso per quella specifica porta di destinazione e se rileva una discrepanza attiva l'allarme nativo `Known Proto on Non Std Port`.
+* **Modello matematico**: Definiamo $A_{proto}$ come l'insieme degli allarmi nativi generati da ntopng a seguito del rilevamento di un disallineamento porta/protocollo:
 
-    $$L7_{DPI} \neq \mathcal{M}(p) \implies M_{proto} = 1$$
+    $$A_{proto} \in \{\text{Known Proto on Non Std Port}\}$$
+
+    Se il sistema intercetta questo evento per un flusso associato all'host monitorato, il tentativo di mascheramento viene certificato e la metrica si attiva:
+
+    $$A_{proto} = \text{True} \implies M_{proto} = 1$$
 
 ### 7. Internal scanning / Fan-out ($M_{scan}$)
 
@@ -116,19 +140,15 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 
 ### 11. Unidirectional flow ($M_{uni}$)
 
-* **Obiettivo:** Rilevare anomalie strutturali nella comunicazione causate da traffico a senso unico. Il protocollo TCP è progettato per essere bidirezionale: anche in caso di invio massiccio di dati, il ricevente deve sempre trasmettere dei pacchetti ACK di conferma. La presenza di flussi in cui i dati viaggiano solo verso l'esterno senza ricevere risposte indica un'anomalia tipica di attacchi DOS (come il SYN Flood), scansioni di rete effettuate alla cieca o l'uso di indirizzi IP falsificati (IP Spoofing).
-* **Metodologia di estrazione:** L'analisi del bilanciamento dei flussi è affidata a **ntopng**, che monitora passivamente lo stato delle sessioni di rete a livello di trasporto (L4). Al termine di ogni finestra oraria (1 ora), lo strumento calcola la percentuale di connessioni avviate dal dispositivo monitorato che non hanno registrato alcun pacchetto in ricezione. Per evitare falsi allarmi dovuti a momentanei malfunzionamenti di internet, ntopng confronta questo dato attuale con la tolleranza storica dell'host.
-* **Modello matematico:** Definiamo $F_{tot}$ come l'insieme totale dei flussi TCP generati dall'host nell'ora corrente $t$, e $F_{uni} \subseteq F_{tot}$ come il sottoinsieme costituito dai soli flussi privi di pacchetti in ricezione. Il tasso orario di flussi unidirezionali si esprime come:
+* **Obiettivo:** Rilevare anomalie strutturali nella comunicazione causate da traffico a senso unico. Il protocollo TCP è progettato per essere bidirezionale, anche in caso di invio massiccio di dati, il ricevente deve sempre trasmettere dei pacchetti ACK di conferma. La presenza di flussi in cui i dati viaggiano solo verso l'esterno senza ricevere risposte indica un'anomalia tipica di attacchi DOS (come il SYN Flood), scansioni di rete effettuate alla cieca o l'uso di indirizzi IP falsificati (IP Spoofing).
+* **Metodologia di estrazione:** L'analisi del bilanciamento dei flussi e dello stato delle connessioni è gestita nativamente dai motori di analisi comportamentale di **ntopng**. Monitorando in tempo reale le sessioni a livello di trasporto (L4), lo strumento tiene traccia dei pacchetti inviati e ricevuti. Se un dispositivo monitorato inizia a generare una quantità anomala di connessioni in uscita (es. pacchetti `SYN`) che non ricevono mai un riscontro in ingresso (nessun `SYN-ACK` o `RST`), ntopng intercetta lo squilibrio e il sistema innesca automaticamente l'allarme `Unidirectional Flow`.
+* **Modello matematico:** Definiamo $A_{uni}$ come l'insieme degli allarmi nativi generati da ntopng a seguito del rilevamento di traffico sistematicamente privo di risposta:
 
-    $$u_t = \frac{|F_{uni}|}{|F_{tot}|}$$
+    $$A_{uni} \in \{\text{Unidirectional Flow}\}$$
 
-    Il sistema valuta poi lo scostamento statistico standardizzato (Z-Score robusto) confrontando il tasso attuale ($u_t$) con la mediana ($\tilde{u}$) e la dispersione assoluta ($MAD$) registrate nei 7 giorni precedenti:
-
-    $$Z_{robusto} = \frac{|u_t - \tilde{u}|}{MAD}$$
-
-    Se l'analisi evidenzia uno particolare scostamento ($Z_{robusto} > 3$) e, allo stesso tempo, la percentuale attuale di flussi senza risposta supera la soglia abituale dell'host ($u_t > \tilde{u}$), l'anomalia viene certificata attivando la metrica:
+    Se il sistema registra questo tipo di evento per l'host monitorato, l'anomalia bidirezionale viene confermata e la metrica si attiva:
   
-    $$Z_{robusto} > 3 \land u_t > \tilde{u} \implies M_{uni} = 1$$
+    $$A_{uni} = \text{True} \implies M_{uni} = 1$$
 
 ### 12. Connection failure rate ($M_{fail}$)
 
