@@ -89,7 +89,7 @@ Ad esempio, quando lo script deve calcolare la metrica dell'*asimmetria volumetr
 Tutte le 10 metriche si trovano all'interno di ntopng, ma vengono gestite in due modi diversi:
 
 * **Metriche native (7):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
-* **Metriche custum (3):** Per l'**Asimmetria volumetrica**, **Connection failure rate** e **Internal scanning**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
+* **Metriche custum (3):** Per l'**Asimmetria volumetrica**, **Connection failure rate** e **ARP Storm**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
 
 ### 2.3 Ricalibrazione dei punteggi
 Un aspetto critico dell'architettura riguarda la gestione e l'assegnazione dei pesi delle anomalie. ntopng utilizza un approccio di calcolo del rischio (*Risk-based scoring approach*) cumulativo e teoricamente illimitato, a ogni evento anomalo viene sommato un punteggio predefinito (es. +210 punti per *Malicious flow detection*), portando l'indicatore di un host compromesso a superare facilmente le migliaia di punti.
@@ -100,4 +100,4 @@ Il nostro script interroga ClickHouse e non estrae il valore numerico del punteg
 Una volta confermata la presenza dell'anomalia, il motore di calcolo assegna esattamente il peso di penalità definito nella nostra tabella teorica.
 
 ### 2.4 Valutazione della sicurezza degli host e della rete  
-L'ultima fase del processo riguarda il calcolo dello *Score globale*. Ogni host viene infatti classificato in base al suo livello di rischio, permettendo di individuare immediatamente quali computer presentano comportamenti anomali e di identificare lo stato dell'intera rete.
+L'ultima fase del processo riguarda il calcolo dello *Score globale*. Ogni host viene infatti classificato in base al suo livello di rischio, permettendo di individuare immediatamente quali computer hanno comportamenti anomali e di identificare lo stato dell'intera rete.
