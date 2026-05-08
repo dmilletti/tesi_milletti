@@ -86,17 +86,17 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 
     $$A_{proto} = \text{True} \implies M_{proto} = 1$$
 
-### 7. Internal scanning / Fan-out ($M_{scan}$)
+### 7. Network discovery ($M_{scan}$)
 
-* **Obiettivo:** Rilevare tentativi di esplorazione non autorizzata all'interno della rete locale, come le scansioni automatizzate o i movimenti laterali di un malware. Di norma, un computer aziendale comunica con un numero limitato e stabile di dispositivi interni (come file server o stampanti). Un improvviso e massiccio aumento del numero di dispositivi diversi contattati nell'arco di un'ora è un forte indicatore che un'infezione sta cercando nuove macchine vulnerabili a cui propagarsi.
-* **Metodologia di estrazione:** La metrica viene gestita nativamente da **ntopng** tramite i suoi motori di analisi comportamentale (*Behavioural checks*). ntopng analizza in tempo reale i flussi di rete e, grazie agli algoritmi di *network discovery*, è in grado di identificare se un host sta tentando di mappare la rete interna. Nello specifico, il sistema monitora il numero di connessioni uniche verso IP interni e la velocità con cui vengono effettuate, innescando allarmi specifici come `Scan`, `SYN Scan` o `Network discovery`.
-* **Modello matematico:** Definiamo $A_{scan}$ come l'insieme degli allarmi nativi di ntopng legati alle attività di scanning della rete. La metrica si attiva se viene registrato almeno un evento di questo tipo per l'host monitorato nell'intervallo di tempo (1 ora):
-
-    $$A_{scan} \in \{\text{Scan, Network discovery, SYN Scan}\}$$
-
-    Se ntopng rileva l'anomalia comportamentale, la metrica si attiva:
-
-    $$A_{scan} = \text{True} \implies M_{scan} = 1$$
+* **Obiettivo:** Rilevare tentativi di mappatura della rete locale. Un computer aziendale comunica solitamente con un insieme ristretto di dispositivi interni; un improvviso aumento degli IP interni contattati indica un'attività di ricognizione tipica delle fasi iniziali di un attacco.
+* **Metodologia di estrazione:** La metrica è gestita dai motori di analisi di **ntopng**. Il sistema monitora il numero di tentativi di connessione (anche falliti) verso nuovi indirizzi IP appartenenti alla rete locale. Se la velocità e il volume di nuovi IP contattati supera le soglie di "network discovery" predefinite, ntopng genera l'allarme specifico.
+* **Modello matematico:** Definiamo $A_{scan}$ come l'insieme degli allarmi nativi di ntopng legati all'identificazione di nuovi nodi nella rete. La metrica si attiva se viene registrato questo evento per l'host monitorato nell'intervallo di tempo (1 ora):
+  
+  $$A_{scan} \in \{\text{Network discovery}\}$$
+  
+  Se ntopng rileva l'anomalia, la metrica si attiva:
+  
+  $$A_{scan} = \text{True} \implies M_{scan} = 1$$
 
 ### 8. Novel protocol detection ($M_{new}$)
 
@@ -178,17 +178,17 @@ Questa sezione descrive le metriche dedicate all'analisi della cosiddetta **"zon
 
     $$Z_{robusto} > 3 \land x_t > \tilde{x} \implies M_{dur} = 1$$
 
-### 14. ARP Storm ($M_{arp}$)
+### 14. SYN Scan ($M_{syn}$)
 
-* **Obiettivo:** Individuare le fasi preparatorie di un attacco *ransomware* o l'espansione di un *worm* all'interno della rete locale. Prima di poter infettare altri dispositivi, questi malware di solito devono mappare l'ambiente circostante. Per farlo, inviano una "tempesta" di richieste ARP (**ARP Storm**) per scoprire gli indirizzi fisici (MAC address) di tutti i computer collegati alla stessa rete. Questo comportamento esplorativo, massiccio e molto rapido, è totalmente sconosciuto alla normale operatività di un computer aziendale.
-* **Metodologia di estrazione:** Il monitoraggio di queste comunicazioni basilari è affidato a **ntopng**, che analizza il traffico al livello più basso della rete locale (L2). ntopng intercetta e somma tutte le singole interrogazioni ARP (messaggi del tipo: "Chi ha questo indirizzo IP?") generate dal computer monitorato allo scadere della finestra oraria. Questo volume totale viene poi messo a confronto con le abitudini storiche del dispositivo.
-* **Modello matematico:** Sia $A_t$ il numero totale di richieste ARP inviate dal dispositivo $h$ nell'ora in corso $t$. Il sistema determina l'anomalia calcolando lo scostamento statistico standardizzato (Z-Score robusto), confrontando il volume attuale ($A_t$) con la mediana ($\tilde{A}$) e la dispersione assoluta ($MAD$) del traffico ARP storico del nodo (profilo a 7 giorni):
+* **Obiettivo:** Identificare scansioni di porte effettuate per scoprire servizi vulnerabili. Questa tecnica prevede l'invio di pacchetti SYN del protocollo TCP verso numerose porte senza mai completare l'handshake, permettendo all'attaccante di mappare i servizi attivi su un target senza stabilire connessioni complete.
+* **Metodologia di estrazione:** Il monitoraggio è affidato al sistema di **ntopng**. Lo strumento analizza i flussi TCP in uscita e rileva pattern in cui un host invia pacchetti SYN a raffica verso porte diverse (dello stesso target o di target multipli) ricevendo RST o non inviando mai l'ACK finale. In questi casi, viene generato l'allarme `SYN Scan`.
+* **Modello matematico:** Definiamo $A_{syn}$ come l'allarme nativo generato da ntopng a seguito del rilevamento della scansione di porte basate su SYN:
+  
+  $$A_{syn} \in \{\text{SYN Scan}\}$$
 
-    $$Z_{robusto} = \frac{|A_t - \tilde{A}|}{MAD}$$
+  Se il sistema registra la generazione di questo allarme per l'host monitorato, la metrica scatta:
 
-    Se il volume di queste richieste locali subisce un incremento notevole rispetto alla norma ($Z_{robusto} > 3$), il sistema certifica che è in corso una mappatura fisica della rete e fa scattare l'allarme:
-
-    $$Z_{robusto} > 3 \implies M_{arp} = 1$$
+  $$A_{syn} = \text{True} \implies M_{syn} = 1$$
 
 ### 15. RTT Latency / Hidden routing ($M_{rtt}$)
 
@@ -230,10 +230,10 @@ I pesi assegnati alle singole metriche non sono casuali, ma derivano da un'anali
   * Server role detection ($M_{srv}$)
 * **Evasione e ricognizione (+30 punti):** Comportamenti tipici delle fasi intermedie di un attacco (es. movimenti laterali), che potrebbero però coincidere con interventi di amministrazione.
   * Non-standard Port/Protocol ($M_{proto}$)
-  * Internal scanning / Fan-out ($M_{scan}$)
+  * Network discovery ($M_{scan}$)
   * Connection failure rate ($M_{fail}$)
   * Session duration / Reverse shell ($M_{dur}$)
-  * ARP Storm ($M_{arp}$)
+  * SYN Scan ($M_{syn}$)
   * RTT Latency / Hidden routing ($M_{rtt}$)
 * **Anomalie di profilo e di volume (+20 punti):** Assegnati ad anomalie quantitative. Hanno un'alta probabilità di falsi positivi, pertanto il peso ridotto garantisce che l'host rimanga in zona "verde/sicura" se l'evento è unico.
   * Novel protocol detection ($M_{new}$)
@@ -324,16 +324,6 @@ Proprio perché l'SNI è così utile ai sistemi di difesa, i virus e i programmi
 È qui che entra in gioco la metrica **M_sni**. Nella navigazione normale di un dipendente, l'SNI è sempre presente perché è richiesto dal server per instaurare correttamente la connessione. Di conseguenza, se dal computer parte una connessione in cui l'SNI è mancante, il nostro sistema rileva subito un'evidente anomalia strutturale, tipica di un software malevolo, e fa scattare l'allarme. 
 
 Infine, questo metodo di controllo rimane efficace anche contro i nuovi standard che mirano a nascondere e cifrare l'SNI (come la tecnologia ECH). Anche quando queste tecnologie nascondono i dati, la struttura del pacchetto di rete deve comunque rispettare delle regole rigide e fisse. Se il malware tenta di alterare la connessione omettendo delle parti fondamentali, il nostro modello rileva l'irregolarità strutturale e blocca la minaccia prima ancora di doverne leggere il contenuto.
-
-### 4.6 Evoluzione del ransomware e necessità della metrica di ricognizione ($M_{arp}$)
-
-Negli ultimi anni, il panorama delle minacce informatiche ha subito una trasformazione radicale. Come analizzato nel recente studio di Razaulla et al. [6] (2023) sull'evoluzione e la tassonomia dei ransomware, questi attacchi non si limitano più a infettare e bloccare un singolo host isolato. Le varianti moderne puntano a massimizzare i danni e i profitti paralizzando intere infrastrutture.
-
-Per raggiungere questo scopo devastante, prima di avviare la vera e propria cifratura dei file, il ransomware attraversa una fase di preparazione silenziosa. In questo lasso di tempo, il software malevolo esegue una mappatura aggressiva della rete locale alla ricerca di altri dispositivi vulnerabili o di "file server" condivisi verso cui propagarsi (come il *Later movement*). 
-
-A livello base della rete (L2/ Data link), questa esplorazione si traduce nell'invio di una tempesta di richieste ARP (ARP Storm): il computer infetto interroga freneticamente la rete per scoprire gli indirizzi fisici (MAC address) di tutti i dispositivi circostanti.
-
-È proprio in questa fase critica che interviene la nostra metrica $M_{arp}$. Invece di agire in ritardo cercando firme note o file già cifrati, il nostro sistema valuta il volume di queste richieste di servizio L2. Poiché un **ARP Storm** rappresenta un comportamento totalmente innaturale per la normale operatività di un dipendente, il calcolo statistico del nostro sistema ($Z_{robusto}$) rileva immediatamente l'anomalia esplorativa. Questo approccio garantisce l'isolamento tempestivo del nodo compromesso, bloccando il malware nella sua fase preparatoria e prevenendo la compromissione dell'intera rete.
 
 ---
 
