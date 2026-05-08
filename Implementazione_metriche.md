@@ -22,10 +22,10 @@ Il sottoinsieme delle metriche selezionate per l'implementazione è il seguente:
 4. **SNI Evasion** ($M_{sni}$)
 5. **Server role detection** ($M_{srv}$)
 6. **Non-standard Port/Protocol** ($M_{proto}$)
-7. **Internal scanning/Fan-out** ($M_{scan}$)
+7. **Network discovery** ($M_{scan}$)
 8. **Asimmetria volumetrica in uscita** ($M_{vol}$)
 9. **Connection failure rate** ($M_{fail}$)
-10. **ARP Storm** ($M_{arp}$)
+10. **SYN Scan** ($M_{syn}$)
 
 Prima di passare all'implementazione vera e propria delle metriche, andiamo a vedere alcuni scenari dove dimostriamo che le metriche scelte sono ideali per coprire la maggior parte dello specchio delle anomalie di rete.
 
@@ -38,9 +38,9 @@ Come le nostre metriche rilevano l'attacco:
 1.  **Fase di Contatto (C&C):** Il malware prova a collegarsi al server dell'hacker per ricevere istruzioni. 
     * **$M_{rep}$ (Destination reputation):** Scatta subito se l'IP di destinazione è già noto nelle blacklist.
     * **$M_{cert}$ (TLS certificate anomalies):** Se l'hacker usa un server con un certificato auto-firmato per risparmiare, la metrica lo segnala immediatamente.
-2.  **Fase di esplorazione (Reconnaissance):** Il malware inizia a scansionare la rete locale per trovare server con dati sensibili.
-    * **$M_{arp}$ (ARP Storm):** Il PC infetto invia tante richieste ARP per mappare tutti i dispositivi fisici vicini. È un comportamento tipico dei ransomware che ntopng rileva immediatamente.
-    * **$M_{scan}$ (Internal scanning):** Una volta individuati gli IP, il malware scansiona le porte. La nostra metrica rileva l'alto numero di connessioni verso host interni diversi (Fan out).
+2.  **Fase di esplorazione (Reconnaissance):** Il malware inizia a scansionare la rete locale e cerca vulnerabilità.
+    * **$M_{scan}$ (Network discovery):** Rileva il tentativo dell'host di identificare altri dispositivi attivi nella sottorete tramite l'analisi del numero di nuovi IP interni contattati.
+    * **$M_{syn}$ (SYN Scan):** Identifica la scansione attiva delle porte tramite pacchetti SYN che non completano mai l'handshake.
 3.  **Fase di Preparazione:** Il malware apre una *Backdoor* per permettere all'hacker di entrare nel sistema.
     * **$M_{srv}$ (Server Role):** Il PC del dipendente, che è sempre stato un semplice client, inizia improvvisamente ad accettare connessioni dall'esterno. ntopng rileva l'inversione di ruolo e fa scattare l'allarme.
 
@@ -88,8 +88,8 @@ Ad esempio, quando lo script deve calcolare la metrica dell'*asimmetria volumetr
 ### 2.2 Integrazione delle metriche in ntopng  
 Tutte le 10 metriche si trovano all'interno di ntopng, ma vengono gestite in due modi diversi:
 
-* **Metriche native (7):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
-* **Metriche custum (3):** Per l'**Asimmetria volumetrica**, **Connection failure rate** e **ARP Storm**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
+* **Metriche native (8):** sono i controlli che ntopng ha già di serie. Il sistema le usa così come sono, leggendo i risultati che nDPI fornisce in tempo reale.
+* **Metriche custum (2):** Per l'**Asimmetria volumetrica** e **Connection failure rate**, andremo a creare dei nuovi controlli all'interno di ntopng. Questi controlli useranno i dati storici salvati su ClickHouse per calcolare lo Z-Score e capire se il traffico attuale è normale oppure se è sospetto.
 
 ### 2.3 Ricalibrazione dei punteggi
 Un aspetto critico dell'architettura riguarda la gestione e l'assegnazione dei pesi delle anomalie. ntopng utilizza un approccio di calcolo del rischio (*Risk-based scoring approach*) cumulativo e teoricamente illimitato, a ogni evento anomalo viene sommato un punteggio predefinito (es. +210 punti per *Malicious flow detection*), portando l'indicatore di un host compromesso a superare facilmente le migliaia di punti.
