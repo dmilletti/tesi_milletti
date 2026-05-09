@@ -25,15 +25,11 @@ Queste metriche operano secondo una logica booleana e non necessitano di un peri
 
 ### 2. Client Fingerprinting ($M_{ja4}$)
 
-* **Obiettivo:** Identificare e classificare la natura del software che genera traffico di rete analizzando il suo fingerprinting durante la negoziazione dei protocolli cifrati (TLS). Poiché ogni applicazione (sia un browser legittimo o un malware) negozia la connessione in modo unico, questa metrica permette di distinguere strumenti autorizzati da software malevoli o non autorizzati, indipendentemente dalla destinazione contattata.
-* **Metodologia di estrazione:** L'estrazione dei dati avviene tramite **ntopng**, che agisce ispezionando la fase iniziale della connessione cifrata, nota come *TLS Client Hello*. **ntopng** analizza i parametri in chiaro inviati dal client (algoritmi supportati, versioni del protocollo ed estensioni) e calcola l'impronta **JA4**, una stringa modulare che rappresenta univocamente il comportamento del software di rete. Questa firma viene poi confrontata in tempo reale con database di *Threat Intelligence* integrate in ntopng, che catalogano le impronte associate a strumenti d'attacco noti, come Cobalt Strike o Metasploit. In caso di corrispondenza, ntopng genera nativamente l'allarme specifico `Malicious Fingerprinting`.
-* **Modello matematico:** Definiamo $A_{ja4}$ come l'insieme degli allarmi nativi generati da ntopng a seguito del rilevamento di un'impronta TLS compromessa. 
-
-    $$A_{ja4} \in \{\text{Malicious Fingerprint}\}$$
-
-    Se il motore rileva l'utilizzo di un software malevolo da parte dell'host monitorato, l'evento viene registrato e la metrica si attiva:
+* **Obiettivo:** Identificare e classificare la natura del software che genera traffico di rete analizzando il suo fingerprinting durante la negoziazione dei protocolli cifrati (TLS). Poiché ogni applicazione negozia la connessione in modo unico, questa metrica permette di distinguere strumenti autorizzati da software malevoli o non autorizzati (come Cobalt Strike o Metasploit), indipendentemente dalla destinazione contattata.
+* **Metodologia di estrazione:** L'estrazione dei dati avviene tramite **ntopng**, che analizza la fase di *TLS Client Hello* e calcola l'impronta **JA4**. Per diminuire la probabilità di falsi positivi, l'impronta viene esportata nel database **ClickHouse**, dove il motore di calcolo esegue un confronto (viene effettuata una JOIN) con una tabella dedicata costruita utilizzando il database di *Threat Intelligence* certificati di **FoxIO** (o **Abuse.ch**). Questo processo garantisce che la metrica si attivi solo in presenza di un riscontro certo con firme associate esclusivamente a minacce note.
+* **Modello matematico:** Definiamo $F_{host}$ come l'insieme delle impronte JA4 registrate per l'host monitorato e $F_{malware}$ come l'insieme delle impronte malevole certificate nel database di intelligence. La metrica si attiva se l'intersezione tra i due insiemi non è vuota:
   
-    $$A_{ja4} = \text{True} \implies M_{ja4} = 1$$
+  $$F_{host} \cap F_{malware} \neq \emptyset \implies M_{ja4} = 1$$
 
 ### 3. TLS Certificate Anomalies ($M_{cert}$)
 
