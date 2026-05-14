@@ -4,6 +4,25 @@ SISTEMA DI RILEVAMENTO ANOMALIE DI RETE
 Metrica M_rep - Destination Reputation
 =============================================================================
 
+Obiettivo:
+    Rilevare comunicazioni tra host interni e indirizzi IP noti come
+    malevoli (server C2, nodi Tor, domini di phishing) consultando
+    le blacklist integrate di ntopng.
+
+Logica differenziata in base alla direzione del contatto:
+    Caso A - l'host interno ha contattato un server blacklistato:
+            è un segnale di COMPROMISSIONE ATTIVA (probabile C2 o esfiltrazione) -> +50 punti
+    Caso B - un client esterno blacklistato ha contattato il nostro host:
+            è un segnale di esposizione/scansione, non compromissione -> +10 punti
+    Caso C - entrambi (estremamente raro): prevale Caso A -> +50 punti
+
+Frequenza di esecuzione:
+    Event-driven (metrica deterministica): lo script va eseguito ogni ora
+    tramite cron o systemd timer.
+
+Fonte dei dati:
+    Tabella `flows` di ntopng su ClickHouse.
+
 Soglie di rischio dello score finale S(h):
     Verde  ->  0-29  punti  (host sicuro)
     Giallo -> 30-59  punti  (host sospetto, da monitorare)
@@ -26,10 +45,13 @@ CLICKHOUSE_DATABASE = "ntopng"
 CLICKHOUSE_USER     = "default"
 CLICKHOUSE_PASSWORD = "0022"
 
-# Peso della metrica
-PESO_M_REP = 50
+# Pesi differenziati per la direzione del contatto:
+# - SRV blacklisted = host ha contattato un IP malevolo (compromissione)
+# - CLI blacklisted = host è stato contattato da un IP malevolo (scansione)
+PESO_SRV_BLACKLISTED = 50   # Gravità critica
+PESO_CLI_BLACKLISTED = 10   # Segnale debole
 
-# Finestra temporale di analisi: guardiamo i flussi dell'ultima ora (24 ore per test)
+# Finestra temporale di analisi (ultima ora)
 FINESTRA_ORE = 24
 
 
@@ -37,30 +59,42 @@ FINESTRA_ORE = 24
 # QUERY SQL
 # =============================================================================
 
-# Questa query implementa direttamente la formula matematica del piano operativo:
-#   A_rep = True  ->  M_rep = 1
+# La query applica la differenziazione dei pesi a livello SQL.
 #
-# Per ogni host sorgente (IPV4_SRC_ADDR), conta quante volte ha contattato
-# un server blacklistato (IS_SRV_BLACKLISTED = 1) o se è stato 
-# identificato come client blacklistato (IS_CLI_BLACKLISTED = 1).
-# La clausola HAVING filtra e restituisce solo gli host con almeno un hit.
-#
-# Colonne usate dello schema ClickHouse:
-#   - IPV4_SRC_ADDR      -> IP sorgente del flusso (host monitorato)
-#   - IS_SRV_BLACKLISTED -> 1 se il server di destinazione è in blacklist
-#   - IS_CLI_BLACKLISTED -> 1 se il client è in blacklist
-#   - FIRST_SEEN         -> timestamp di inizio flusso (usato per la finestra oraria)
+# multiIf() è l'equivalente di una catena di if/elif:
+#   - se hits_srv_blacklisted > 0    -> assegna PESO_SRV_BLACKLISTED
+#   - altrimenti se hits_cli_blacklisted > 0 -> assegna PESO_CLI_BLACKLISTED
+#   - altrimenti -> 0
+# Se un host ha contattato un server BL, vale +50 anche se è stato anche contattato
+# da un client BL (non sommiamo, evitiamo doppio peso).
 
 QUERY_M_REP = f"""
 SELECT
-    IPv4NumToString(IPV4_SRC_ADDR)          AS host_ip,
-    countIf(IS_SRV_BLACKLISTED = 1)         AS hits_srv_blacklisted,
-    countIf(IS_CLI_BLACKLISTED = 1)         AS hits_cli_blacklisted,
+    IPv4NumToString(IPV4_SRC_ADDR) AS host_ip,
+    countIf(IS_SRV_BLACKLISTED = 1) AS hits_srv_blacklisted,
+    countIf(IS_CLI_BLACKLISTED = 1) AS hits_cli_blacklisted,
+
+    -- Hit totali (puramente informativo, non usato per il peso)
     hits_srv_blacklisted + hits_cli_blacklisted AS hits_totali,
 
-    -- Questo implementa la formula: A_rep = True -> M_rep = 1
-    -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
-    if(hits_totali > 0, 1, 0)               AS M_rep
+    -- Se condizione è vera M_rep si attiva (hits_totali > 0), restituisce 1; altrimenti 0
+    if(hits_totali > 0, 1, 0) AS M_rep,
+
+    -- Penalità DIFFERENZIATA in base alla direzione del contatto:
+    --   - se ha contattato server BL: +50 (host probabilmente compromesso)
+    --   - altrimenti se contattato da client BL: +10 (solo bersaglio)
+    multiIf(
+        hits_srv_blacklisted > 0, {PESO_SRV_BLACKLISTED},
+        hits_cli_blacklisted > 0, {PESO_CLI_BLACKLISTED},
+        0
+    ) AS penalita_calcolata,
+
+    -- Scenario testuale (utile per il report)
+    multiIf(
+        hits_srv_blacklisted > 0, 'COMPROMISSIONE ATTIVA (contatto a server BL)',
+        hits_cli_blacklisted > 0, 'ESPOSIZIONE (contattato da client BL)',
+        'N/A'
+    ) AS scenario
 
 FROM flows
 WHERE
@@ -69,14 +103,16 @@ WHERE
 
     -- Escludiamo i flussi IPv6 (IPV4_SRC_ADDR = 0 nei flussi IPv6 puri)
     AND IPV4_SRC_ADDR != 0
+    AND CLIENT_LOCATION = 1   -- solo host della LAN interna
 
 GROUP BY host_ip
 
 -- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
 HAVING M_rep = 1
 
--- Ordiniamo per numero di contatti malevoli (i più pericolosi prima)
-ORDER BY hits_totali DESC
+-- Ordinamento: prima i casi più gravi (penalità maggiore),
+-- poi a parità di gravità i più ripetitivi
+ORDER BY penalita_calcolata DESC, hits_totali DESC
 """
 
 
@@ -87,8 +123,6 @@ ORDER BY hits_totali DESC
 def connetti_clickhouse():
     """
     Apre e restituisce la connessione al database ClickHouse.
-    In caso di errore lancia un'eccezione
-    che verrà catturata nel blocco principale.
     """
     client = clickhouse_connect.get_client(
         host     = CLICKHOUSE_HOST,
@@ -103,16 +137,18 @@ def connetti_clickhouse():
 def calcola_m_rep(client):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
+    Il formato del dizionario è identico a quello delle altre metriche.
 
     Struttura del dizionario restituito:
     {
         "192.168.1.45": {
-            "M_rep":              1,
-            "hits_srv":           2,   <- quante volte ha contattato server blacklistati
-            "hits_cli":           0,   <- quante volte è stato lui stesso in blacklist
-            "hits_totali":        2,
-            "penalita":          50,   <- punti da sommare allo score dell'host
-            "timestamp":         "2026-05-11T19:30:00"
+            "M_rep":         1,
+            "hits_srv":      2,    <- flussi verso server blacklistati
+            "hits_cli":      0,    <- flussi da client blacklistati
+            "hits_totali":   2,
+            "scenario":      "COMPROMISSIONE ATTIVA (contatto a server BL)",
+            "penalita":      50,   <- peso differenziato per direzione
+            "timestamp":     "2026-05-13T17:00:00+00:00"
         },
         ...
     }
@@ -122,87 +158,56 @@ def calcola_m_rep(client):
     # Esecuzione della query
     righe = client.query(QUERY_M_REP).result_rows
 
-    # Ogni riga contiene: (host_ip, hits_srv, hits_cli, hits_totali, M_rep)
-    for host_ip, hits_srv, hits_cli, hits_totali, m_rep in righe:
+    # Ogni riga contiene:
+    # (host_ip, hits_srv, hits_cli, hits_totali, M_rep,
+    #  penalita_calcolata, scenario)
+    for (host_ip, hits_srv, hits_cli, hits_totali, m_rep,
+         penalita, scenario) in righe:
 
         risultati[host_ip] = {
             "M_rep":       m_rep,
-            "hits_srv":    hits_srv,    # flussi verso server blacklistati
-            "hits_cli":    hits_cli,    # flussi in cui l'host era esso stesso blacklistato
+            "hits_srv":    hits_srv,      # contatti verso server BL
+            "hits_cli":    hits_cli,      # contatti ricevuti da client BL
             "hits_totali": hits_totali,
-            "penalita":    PESO_M_REP * m_rep,  # 50 se M_rep=1, 0 se M_rep=0
+            "scenario":    scenario,      # descrizione testuale del caso
+            "penalita":    penalita,      # già differenziata dalla query
             "timestamp":   datetime.now(timezone.utc).isoformat()
         }
 
     return risultati
 
 
-def calcola_score_finale(penalita_attive: dict) -> int:
+def stampa_report(host_ip: str, dati: dict):
     """
-    Calcola lo score finale dell'host sommando le penalità di tutte le
-    metriche attive, con un limite massimo a 100.
-
-    Per ora riceviamo solo M_rep. Quando implementeremo le altre metriche,
-    questo dizionario conterrà tutte le penalità attive dell'host.
-
-    Esempio di input futuro:
-    {
-        "M_rep":   50,
-        "M_cert":  40,
-        "M_proto":  0,
-        ...
-    }
+    Stampa un report leggibile per ogni host flaggato dalla sola metrica.
+    Usato quando lo script è eseguito per testing isolato.
     """
-    totale = sum(penalita_attive.values())
-
-    # Il punteggio non può mai superare 100 (normalizzazione del modello)
-    return min(100, totale)
-
-
-def classifica_rischio(score: int) -> tuple[str, str]:
-    """
-    Mappa lo score numerico sulla fascia di rischio.
-
-    Restituisce una tupla (colore, descrizione):
-        Verde  ->  0-29  punti
-        Giallo -> 30-59  punti
-        Rosso  -> 60-100 punti
-    """
-    if score < 30:
-        return ("VERDE",  "Host sicuro - nessun intervento richiesto")
-    elif score < 60:
-        return ("GIALLO", "Host sospetto - monitorare attentamente")
-    else:
-        return ("ROSSO",  "HOST COMPROMESSO - intervento immediato richiesto")
-
-
-def stampa_report(host_ip: str, dati: dict, score: int, fascia: tuple):
-    """
-    Stampa un report leggibile con lo score per ogni host flaggato.
-    """
-    colore, descrizione = fascia
     print("=" * 60)
     print(f"  [ALLARME M_rep] {host_ip}")
     print("=" * 60)
     print(f"  Timestamp         : {dati['timestamp']}")
     print(f"  M_rep             : {dati['M_rep']} (attiva)")
+    print(f"  Scenario          : {dati['scenario']}")
     print(f"  Hit server BL     : {dati['hits_srv']}")
     print(f"  Hit client BL     : {dati['hits_cli']}")
     print(f"  Hit totali        : {dati['hits_totali']}")
     print(f"  Penalità M_rep    : +{dati['penalita']} punti")
-    print(f"  Score S(h)        : {score}/100")
-    print(f"  Fascia di rischio : [{colore}] {descrizione}")
     print()
 
 
 # =============================================================================
-# MAIN
+# MAIN - Esecuzione per testing isolato della metrica
 # =============================================================================
 
 def main():
+    """
+    Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
+    scoring.py importerà direttamente `calcola_m_rep()` dalla funzione sopra.
+    """
     print(f"\n{'='*60}")
     print(f"  Avvio analisi M_rep - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
+    print(f"  Pesi: SRV blacklisted=+{PESO_SRV_BLACKLISTED}, CLI blacklisted=+{PESO_CLI_BLACKLISTED}")
     print(f"{'='*60}\n")
 
     # Step 1: connessione al database
@@ -222,31 +227,13 @@ def main():
 
     # Step 3: report dei risultati
     if not host_flaggati:
-        # Nessun host ha contattato destinazioni blacklistate nell'ultima ora
         print("[OK] Nessun host flaggato - rete pulita nell'ultima ora.\n")
         return
 
     print(f"[!] {len(host_flaggati)} host flaggato/i dalla metrica M_rep:\n")
 
     for host_ip, dati in host_flaggati.items():
-
-        # Costruiamo il dizionario delle penalità attive per questo host.
-        # Ora contiene solo M_rep; le altre metriche verranno aggiunte qui.
-        penalita_attive = {
-            "M_rep": dati["penalita"],
-            # "M_ja4":  0,  <- verrà aggiunto con la metrica successiva
-            # "M_cert": 0,
-            # ...
-        }
-
-        # Calcolo dello score finale con cap a 100
-        score = calcola_score_finale(penalita_attive)
-
-        # Classificazione nella fascia di rischio
-        fascia = classifica_rischio(score)
-
-        # Stampa del report per questo host
-        stampa_report(host_ip, dati, score, fascia)
+        stampa_report(host_ip, dati)
 
 # Esegui questo solo se lanciato come script principale (non importato come modulo)
 if __name__ == "__main__":
