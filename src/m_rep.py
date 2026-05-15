@@ -5,23 +5,40 @@ Metrica M_rep - Destination Reputation
 =============================================================================
 
 Obiettivo:
-    Rilevare comunicazioni tra host interni e indirizzi IP noti come
-    malevoli (server C2, nodi Tor, domini di phishing) consultando
+    Rilevare comunicazioni tra host interni della LAN e indirizzi IP noti
+    come malevoli (server C2, nodi Tor, domini di phishing) consultando
     le blacklist integrate di ntopng.
 
-Logica differenziata in base alla direzione del contatto:
-    Caso A - l'host interno ha contattato un server blacklistato:
-            è un segnale di COMPROMISSIONE ATTIVA (probabile C2 o esfiltrazione) -> +50 punti
-    Caso B - un client esterno blacklistato ha contattato il nostro host:
-            è un segnale di esposizione/scansione, non compromissione -> +10 punti
-    Caso C - entrambi (estremamente raro): prevale Caso A -> +50 punti
+Classificazione su due livelli (rispetto al modello teorico base):
 
-Frequenza di esecuzione:
-    Event-driven (metrica deterministica): lo script va eseguito ogni ora
-    tramite cron o systemd timer.
+  (1) DIREZIONE del contatto:
+      - SRV blacklisted = l'host ha contattato un IP malevolo
+                          -> segnale di COMPROMISSIONE ATTIVA
+      - CLI blacklisted = l'host è stato contattato da un IP malevolo
+                          -> segnale di ESPOSIZIONE/scansione
 
-Fonte dei dati:
-    Tabella `flows` di ntopng su ClickHouse.
+  (2) INTENSITÀ del contatto (numero di hit):
+      Il modello matematico originale prevedeva M_i ∈ {0,1} con peso fisso.
+      La metrica resta binaria, ma il PESO scala con
+      il numero di hit:
+        - Pochi hit (1-2 verso server BL) possono essere falsi positivi
+          (es. blacklist obsoleta). Peso ridotto.
+        - Molti hit (3+ verso server BL) indicano comunicazione
+          persistente con C2 attivo. Peso pieno.
+      Importante: non azzeriamo mai il peso, per non perdere gli attacchi
+      "low and slow" che fanno beacon ogni ora.
+
+Tabella dei pesi applicati:
+
+  Caso SRV blacklisted (host contatta IP malevolo):
+    hits = 1-2  ->  +30 punti (contatto isolato - possibile beacon iniziale)
+    hits = 3+   ->  +50 punti (comunicazione persistente - C2 attivo confermato)
+
+  Caso CLI blacklisted (host è bersaglio di IP malevolo):
+    hits = 1-10 ->  +5  punti (scansione rara - rumore di fondo Internet)
+    hits = 11+  ->  +15 punti (scansione persistente - target mirato)
+
+  Caso entrambi attivi: prevale il caso più grave (SRV blacklisted).
 
 Soglie di rischio dello score finale S(h):
     Verde  ->  0-29  punti  (host sicuro)
@@ -45,28 +62,37 @@ CLICKHOUSE_DATABASE = "ntopng"
 CLICKHOUSE_USER     = "default"
 CLICKHOUSE_PASSWORD = "0022"
 
-# Pesi differenziati per la direzione del contatto:
-# - SRV blacklisted = host ha contattato un IP malevolo (compromissione)
-# - CLI blacklisted = host è stato contattato da un IP malevolo (scansione)
-PESO_SRV_BLACKLISTED = 50   # Gravità critica
-PESO_CLI_BLACKLISTED = 10   # Segnale debole
+# Soglie di intensità
+SOGLIA_SRV_PERSISTENTE = 3
+SOGLIA_CLI_MIRATO      = 11
 
-# Finestra temporale di analisi (ultima ora)
-FINESTRA_ORE = 24
+# Pesi differenziati per direzione e intensità
+PESO_SRV_ISOLATO     = 30   # 1-2 hit verso server BL
+PESO_SRV_PERSISTENTE = 50   # 3+ hit verso server BL
+PESO_CLI_RARO   = 5    # 1-10 hit da client BL
+PESO_CLI_MIRATO      = 15   # 11+ hit da client BL
+
+# Finestra temporale di analisi: guardiamo i flussi dell'ultima ora
+FINESTRA_ORE = 1
 
 
 # =============================================================================
 # QUERY SQL
 # =============================================================================
 
-# La query applica la differenziazione dei pesi a livello SQL.
+# La query applica la differenziazione su entrambi i livelli (direzione e
+# intensità) direttamente lato database, evitando di trasferire dati grezzi
+# allo script Python.
 #
-# multiIf() è l'equivalente di una catena di if/elif:
-#   - se hits_srv_blacklisted > 0    -> assegna PESO_SRV_BLACKLISTED
-#   - altrimenti se hits_cli_blacklisted > 0 -> assegna PESO_CLI_BLACKLISTED
-#   - altrimenti -> 0
-# Se un host ha contattato un server BL, vale +50 anche se è stato anche contattato
-# da un client BL (non sommiamo, evitiamo doppio peso).
+# multiIf() implementa la catena di if/elif annidati:
+#   - se hits_srv >= 3       -> +50 (persistente)
+#   - altrimenti se hits_srv >= 1   -> +30 (isolato)
+#   - altrimenti se hits_cli >= 11  -> +15 (mirato)
+#   - altrimenti se hits_cli >= 1   -> +5  (raro)
+#   - altrimenti                    -> 0
+# Prima si valuta SRV, e solo se non si attiva si scende sul caso CLI.
+#
+# Filtro CLIENT_LOCATION = 1: consideriamo solo host della LAN interna (per ora commentato)
 
 QUERY_M_REP = f"""
 SELECT
@@ -74,36 +100,40 @@ SELECT
     countIf(IS_SRV_BLACKLISTED = 1) AS hits_srv_blacklisted,
     countIf(IS_CLI_BLACKLISTED = 1) AS hits_cli_blacklisted,
 
-    -- Hit totali (puramente informativo, non usato per il peso)
+    -- Hit totali (informativo, non usato per il peso)
     hits_srv_blacklisted + hits_cli_blacklisted AS hits_totali,
 
-    -- Se condizione è vera M_rep si attiva (hits_totali > 0), restituisce 1; altrimenti 0
+    -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
     if(hits_totali > 0, 1, 0) AS M_rep,
 
-    -- Penalità DIFFERENZIATA in base alla direzione del contatto:
-    --   - se ha contattato server BL: +50 (host probabilmente compromesso)
-    --   - altrimenti se contattato da client BL: +10 (solo bersaglio)
+    -- Penalità DIFFERENZIATA su DIREZIONE e INTENSITÀ
     multiIf(
-        hits_srv_blacklisted > 0, {PESO_SRV_BLACKLISTED},
-        hits_cli_blacklisted > 0, {PESO_CLI_BLACKLISTED},
+        hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, {PESO_SRV_PERSISTENTE},
+        hits_srv_blacklisted >= 1,                        {PESO_SRV_ISOLATO},
+        hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      {PESO_CLI_MIRATO},
+        hits_cli_blacklisted >= 1,                        {PESO_CLI_RARO},
         0
     ) AS penalita_calcolata,
 
-    -- Scenario testuale (utile per il report)
+    -- Scenario testuale per il report
     multiIf(
-        hits_srv_blacklisted > 0, 'COMPROMISSIONE ATTIVA (contatto a server BL)',
-        hits_cli_blacklisted > 0, 'ESPOSIZIONE (contattato da client BL)',
+        hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, 'COMPROMISSIONE PERSISTENTE (C2 attivo - hits ripetuti)',
+        hits_srv_blacklisted >= 1,                        'CONTATTO ISOLATO a server BL (possibile beacon iniziale)',
+        hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      'SCANSIONE MIRATA (target persistente)',
+        hits_cli_blacklisted >= 1,                        'SCANSIONE RARA (rumore di fondo Internet)',
         'N/A'
     ) AS scenario
 
 FROM flows
 WHERE
-    -- Finestra temporale (ultima ora di traffico)
+    -- Finestra temporale: ultima ora di traffico
     FIRST_SEEN >= now() - INTERVAL {FINESTRA_ORE} HOUR
 
     -- Escludiamo i flussi IPv6 (IPV4_SRC_ADDR = 0 nei flussi IPv6 puri)
     AND IPV4_SRC_ADDR != 0
-    AND CLIENT_LOCATION = 1   -- solo host della LAN interna
+
+    -- Consideriamo SOLO host della LAN interna (per ora commentato)
+    -- Per AND CLIENT_LOCATION = 1
 
 GROUP BY host_ip
 
@@ -137,18 +167,20 @@ def connetti_clickhouse():
 def calcola_m_rep(client):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
-    Il formato del dizionario è identico a quello delle altre metriche.
+
+    Il formato del dizionario è simmetrico a quello delle altre metriche
+    per permettere a scoring.py di trattare tutte le metriche uniformemente.
 
     Struttura del dizionario restituito:
     {
         "192.168.1.45": {
             "M_rep":         1,
-            "hits_srv":      2,    <- flussi verso server blacklistati
-            "hits_cli":      0,    <- flussi da client blacklistati
-            "hits_totali":   2,
-            "scenario":      "COMPROMISSIONE ATTIVA (contatto a server BL)",
-            "penalita":      50,   <- peso differenziato per direzione
-            "timestamp":     "2026-05-13T17:00:00+00:00"
+            "hits_srv":      4,
+            "hits_cli":      0,
+            "hits_totali":   4,
+            "scenario":      "COMPROMISSIONE PERSISTENTE (C2 attivo - hits ripetuti)",
+            "penalita":      50,
+            "timestamp":     "2026-05-14T17:00:00+00:00"
         },
         ...
     }
@@ -166,11 +198,11 @@ def calcola_m_rep(client):
 
         risultati[host_ip] = {
             "M_rep":       m_rep,
-            "hits_srv":    hits_srv,      # contatti verso server BL
-            "hits_cli":    hits_cli,      # contatti ricevuti da client BL
+            "hits_srv":    hits_srv,
+            "hits_cli":    hits_cli,
             "hits_totali": hits_totali,
-            "scenario":    scenario,      # descrizione testuale del caso
-            "penalita":    penalita,      # già differenziata dalla query
+            "scenario":    scenario,
+            "penalita":    penalita,    # già differenziata dalla query
             "timestamp":   datetime.now(timezone.utc).isoformat()
         }
 
@@ -179,12 +211,12 @@ def calcola_m_rep(client):
 
 def stampa_report(host_ip: str, dati: dict):
     """
-    Stampa un report leggibile per ogni host flaggato dalla sola metrica.
-    Usato quando lo script è eseguito per testing isolato.
+    Stampa un report leggibile per ogni host flagged dalla sola metrica.
+    Usato quando lo script è eseguito per testing..
     """
-    print("=" * 60)
+    print("=" * 70)
     print(f"  [ALLARME M_rep] {host_ip}")
-    print("=" * 60)
+    print("=" * 70)
     print(f"  Timestamp         : {dati['timestamp']}")
     print(f"  M_rep             : {dati['M_rep']} (attiva)")
     print(f"  Scenario          : {dati['scenario']}")
@@ -196,21 +228,25 @@ def stampa_report(host_ip: str, dati: dict):
 
 
 # =============================================================================
-# MAIN - Esecuzione per testing isolato della metrica
+# MAIN - Esecuzione per testing della metrica
 # =============================================================================
 
 def main():
     """
-    Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
+    Quando integreremo tutto in scoring.py, questa funzione non verrà chiamata.
     scoring.py importerà direttamente `calcola_m_rep()` dalla funzione sopra.
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"  Avvio analisi M_rep - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
-    print(f"  Pesi: SRV blacklisted=+{PESO_SRV_BLACKLISTED}, CLI blacklisted=+{PESO_CLI_BLACKLISTED}")
-    print(f"{'='*60}\n")
+    print(f"  Pesi differenziati su direzione e intensità:")
+    print(f"    SRV isolato (1-{SOGLIA_SRV_PERSISTENTE-1}): +{PESO_SRV_ISOLATO}     "
+          f"SRV persistente ({SOGLIA_SRV_PERSISTENTE}+): +{PESO_SRV_PERSISTENTE}")
+    print(f"    CLI raro (1-{SOGLIA_CLI_MIRATO-1}): +{PESO_CLI_RARO}     "
+          f"CLI mirato ({SOGLIA_CLI_MIRATO}+): +{PESO_CLI_MIRATO}")
+    print(f"{'='*70}\n")
 
-    # Step 1: connessione al database
+    # Connessione al database
     try:
         client = connetti_clickhouse()
         print("[OK] Connessione a ClickHouse stabilita.\n")
@@ -218,21 +254,21 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Step 2: calcolo della metrica M_rep
+    # Calcolo della metrica M_rep
     try:
-        host_flaggati = calcola_m_rep(client)
+        flagged_host = calcola_m_rep(client)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
-    # Step 3: report dei risultati
-    if not host_flaggati:
-        print("[OK] Nessun host flaggato - rete pulita nell'ultima ora.\n")
+    # Report dei risultati
+    if not flagged_host:
+        print("[OK] Nessun host flagged - rete pulita nell'ultima ora.\n")
         return
 
-    print(f"[!] {len(host_flaggati)} host flaggato/i dalla metrica M_rep:\n")
+    print(f"[!] {len(flagged_host)} host flagged dalla metrica M_rep:\n")
 
-    for host_ip, dati in host_flaggati.items():
+    for host_ip, dati in flagged_host.items():
         stampa_report(host_ip, dati)
 
 # Esegui questo solo se lanciato come script principale (non importato come modulo)

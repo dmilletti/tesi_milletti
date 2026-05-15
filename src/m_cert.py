@@ -62,7 +62,7 @@ CLICKHOUSE_PASSWORD = "0022"
 PESO_M_CERT = 40
 
 # Finestra temporale di analisi: guardiamo i flussi dell'ultima ora
-FINESTRA_ORE = 24  # per test possiamo allargare a 24 ore
+FINESTRA_ORE = 1  # per test possiamo allargare a 24 ore
 
 
 # =============================================================================
@@ -106,7 +106,7 @@ FROM flow_alerts_view
 WHERE
     -- Finestra temporale: ultima ora di traffico
     tstamp >= now() - INTERVAL {FINESTRA_ORE} HOUR
-    AND cli_location = 1   -- solo host della LAN interna
+    -- AND cli_location = 1   -- solo host della LAN interna (per ora commentato)
 
     -- Pre-filtro: ci interessano SOLO i flussi con almeno un bit di
     -- certificato attivo. Sfruttiamo l'efficienza colonnare di ClickHouse
@@ -197,7 +197,7 @@ def calcola_m_cert(client):
 
 def stampa_report(host_ip: str, dati: dict):
     """
-    Stampa un report leggibile per ogni host flaggato dalla sola metrica.
+    Stampa un report leggibile per ogni host flagged dalla sola metrica.
     Usato quando lanciamo questo script in modalità "test".
     Quando invece chiamato da `scoring.py`, sarà quello a stampare il
     report unificato che somma tutte le metriche.
@@ -241,19 +241,19 @@ def main():
 
     # Step 2: calcolo della metrica M_cert
     try:
-        host_flaggati = calcola_m_cert(client)
+        flagged_host = calcola_m_cert(client)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
     # Step 3: report dei risultati
-    if not host_flaggati:
-        print("[OK] Nessun host flaggato - nessuna anomalia di certificato nell'ultima ora.\n")
+    if not flagged_host:
+        print("[OK] Nessun host flagged - nessuna anomalia di certificato nell'ultima ora.\n")
         return
 
-    print(f"[!] {len(host_flaggati)} host flaggato/i dalla metrica M_cert:\n")
+    print(f"[!] {len(flagged_host)} host flagged dalla metrica M_cert:\n")
 
-    for host_ip, dati in host_flaggati.items():
+    for host_ip, dati in flagged_host.items():
         stampa_report(host_ip, dati)
 
 # Esegui questo solo se lanciato come script principale (non importato come modulo)
