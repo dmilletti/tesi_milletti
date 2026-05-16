@@ -217,12 +217,11 @@ def stampa_report(host_ip: str, dati: dict):
 
 
 # =============================================================================
-# MAIN - Esecuzione per testing isolato della metrica
+# MAIN - Esecuzione per testing
 # =============================================================================
 
 def main():
     """
-    Esecuzione standalone della metrica.
     Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
     scoring.py importerà direttamente `calcola_m_cert()` dalla funzione sopra.
     """
@@ -231,7 +230,7 @@ def main():
     print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
     print(f"{'='*60}\n")
 
-    # Step 1: connessione al database
+    # Connessione al database
     try:
         client = connetti_clickhouse()
         print("[OK] Connessione a ClickHouse stabilita.\n")
@@ -239,14 +238,14 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Step 2: calcolo della metrica M_cert
+    # Calcolo della metrica M_cert
     try:
         flagged_host = calcola_m_cert(client)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
-    # Step 3: report dei risultati
+    # Report dei risultati
     if not flagged_host:
         print("[OK] Nessun host flagged - nessuna anomalia di certificato nell'ultima ora.\n")
         return

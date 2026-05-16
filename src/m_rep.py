@@ -228,7 +228,7 @@ def stampa_report(host_ip: str, dati: dict):
 
 
 # =============================================================================
-# MAIN - Esecuzione per testing della metrica
+# MAIN - Esecuzione per testing
 # =============================================================================
 
 def main():
