@@ -233,7 +233,7 @@ def stampa_report(host_ip: str, dati: dict):
 
 def main():
     """
-    Quando integreremo tutto in scoring.py, questa funzione non verrà chiamata.
+    Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata.
     scoring.py importerà direttamente `calcola_m_rep()` dalla funzione sopra.
     """
     print(f"\n{'='*70}")
