@@ -18,7 +18,7 @@ Formula operativa (vedere documento di decisioni progettuali per i dettagli):
     MAD_eff = max( MAD, 0.10 * mediana, 1 MB )    <- triplo floor:
                                                   - MAD reale
                                                   - 10% mediana (scala-relativo)
-                                                  - 1 MB assoluto (anti-idle)
+                                                  - 1 MB assoluto (anti-inattività)
 
     Z_robusto = ( V_out - mediana ) / MAD_eff <- direzionale, senza valore assoluto
 
@@ -71,7 +71,7 @@ PESO_M_VOL = 20
 # ---- Parametri statistici ---------------------------------------------------
 
 # Soglia di anomalia statistica (regola empirica 68-95-99.7)
-# Z > 3 significa che l'evento ha < 0.3% di probabilita' di essere ordinario
+# Z > 3 significa che l'evento ha < 0.3% di probabilità di essere ordinario
 SOGLIA_Z = 3.0
 
 # Previene la divisione per zero su host a baseline costante.
@@ -79,10 +79,10 @@ SOGLIA_Z = 3.0
 MAD_MIN_FRAZIONE = 0.10
 
 # Floor assoluto sulla MAD (in byte)
-# Terzo termine del greatest() che garantisce la stabilita' numerica anche
+# Terzo termine del greatest() che garantisce la stabilità numerica anche
 # su host con baseline molto bassa o nulla. Identificato come raffinamento
 # in fase di validazione (test stagionale).
-# 1 MB e' un compromesso: abbastanza grande da neutralizzare host quasi inattivi,
+# 1 MB è un compromesso: abbastanza grande da neutralizzare host quasi inattivi,
 # abbastanza piccolo da non oscurare anomalie reali su host di volume medio-alto.
 MAD_MIN_ASSOLUTO = 1024 * 1024  # 1 MB in byte
 
