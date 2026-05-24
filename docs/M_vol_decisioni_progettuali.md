@@ -79,7 +79,7 @@ La scelta del fattore 0.10 è motivata osservando che la dispersione del traffic
 
 ### Raffinamento: terzo termine
 
-Sono stati effettuati diversi test per validare la metrica,nel test di Livello 3 (test stagionale) è stato evidenziato che la formula proporzionale è ancora vulnerabile in due scenari:
+Sono stati effettuati diversi test per validare la metrica,nel test di livello 3 (test stagionale) è stato evidenziato che la formula proporzionale è ancora vulnerabile in due scenari:
 
 * **Host a baseline molto bassa**: un host con mediana di 10 KB ha valore minimo di 1 KB. Sufficiente per la divisione, ma molto piccolo in termini operativi; combinato con valori di $V_{out}$ medi, può ancora produrre $Z$ artificialmente alti.
 * **Host a baseline nulla nella categoria corrente**: un host che non ha mai trasmesso nella fascia oraria corrente (es. ufficio nel weekend) ha mediana=0, quindi anche il limite inferiore è 0, e la divisione esplode comunque.
@@ -176,9 +176,9 @@ La metrica è stata validata su tre livelli di test progressivi, ognuno dei qual
 
 ### 8.1 Livello 1 - Validazione della formula
 
-L'obiettivo è verificare che la formula matematica produca i valori attesi su input controllati.
+L'obiettivo è verificare che la formula matematica produca i valori attesi su input controllati. Questo permette di ragionare sulla logica della metrica senza i tempi di esecuzione e i possibili effetti di una query reale.
 
-Sono stati effettuati 12 casi di test che esercitano in modo sistematico tutti i rami della formula:
+Sono stati effettuati 12 casi di test che coprono in modo sistematico tutti i rami della formula:
 
 * casi base con input normali
 * tre comportamenti della soglia sulla MAD (proporzionale prevale, assoluto prevale, MAD reale prevale)
@@ -192,7 +192,7 @@ Tutti e 12 i casi sono passati. Per ulteriori dettagli, vedere lo script "test_m
 
 L'obiettivo è verificare che la query SQL, eseguita su ClickHouse con dati controllati, produca i risultati attesi.
 
-È stata costruita appositamente una tabella di test (`flows_test`), la quale viene popolata con quattro profili di host distinti:
+È stata costruita appositamente una tabella di test `flows_test` (replica dello schema della tabella `flows`), la quale viene popolata con quattro profili di host distinti:
 
 | Host | Profilo | Attesa |
 | --- | --- | --- |
@@ -201,13 +201,22 @@ L'obiettivo è verificare che la query SQL, eseguita su ClickHouse con dati cont
 | 10.0.0.3 | Server costante a 1 MB con picco di 80 MB | $M_{vol} = 1$, limite inferiore attivo |
 | 10.0.0.4 | Cold start (solo 10 bucket di storico) | escluso dal calcolo |
 
+I dati storici di ciascun host vengono distribuiti su sette giorni con timestamp realistici, in modo che la query incontri esattamente la configurazione attesa.Lo script poi esegue la query reale di M_vol sulla tabella `flows_test` e confronta i risultati attesi per ogni profilo.
+
 Tutti e quattro i profili sono stati gestiti correttamente. In particolare, l'host 10.0.0.3 ha attivato il limite inferiore come previsto, con $MAD_{eff} = 1 \text{ MB}$ e $Z$ ≈ 79. Per ulteriore dettagli vedere lo script "test_m_vol_db.py".
 
 ### 8.3 Livello 3 - Validazione della baseline
 
 L'obiettivo è dimostrare che la baseline a tre categorie distingue correttamente lo stesso host in fasce orarie diverse.
 
-Per testare la risposta del sistema, lo stesso host è stato osservato in tre scenari temporali distinti all'interno della settimana. Questo approccio ha permesso di lasciare intatto lo storico dei dati, andando a modificare soltanto sull'orario di riferimento della query. La funzione `now()` usata in produzione è stata infatti temporaneamente parametrizzata e sostituita con una variabile esterna denominata `ora_simulata`.
+Per testare la risposta del sistema, lo stesso host è stato osservato in tre scenari temporali distinti all'interno della settimana. Questo approccio ha permesso di lasciare intatto lo storico dei dati, andando a modificare soltanto sull'orario di riferimento della query. La funzione `now()`(che fissi l'instante di valutazione) usata nella query dello script principale è stata infatti temporaneamente parametrizzata e sostituita con una variabile esterna denominata `ora_simulata`.
+Lo script di test (`test_m_vol_seasonal.py`) genera un singolo host stagionale (10.0.0.5) con baseline diversa nelle tre fasce orarie:
+
+* **Feriale lavorativo (lun-ven 9-17)**: ~15 MB/bucket, comportamento da ufficio
+* **Feriale fuori orario (lun-ven 18-8)**: 30-70 KB/bucket, host quasi spento
+* **Weekend (sab-dom)**: 0 byte, host completamente inattivo
+
+Sullo stesso storico vengono eseguiti tre run con ora di valutazione diversa:
 
 | Run | Orario | Categoria | $V_{out}$ | $\tilde{V}$ baseline | $Z$ | $M_{vol}$ |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -215,8 +224,8 @@ Per testare la risposta del sistema, lo stesso host è stato osservato in tre sc
 | 2 | Lunedì 23:00 | feriale_fuoriorario | 60.00 MB | 46.94 KB | 6172.46 | 1 |
 | 3 | Sabato 14:00 | weekend | 30.00 MB | (host assente) | n/d | 0 |
 
-Tutti e tre i run passati. Il confronto tra "Run 1" e "Run 2" è significativo, infatti lo stesso host con un volume quattro volte superiore alle 23:00 viene correttamente identificato come anomalia, mentre alle 14:00 con 15 MB viene considerato normale. Per ulteriori dettagli vedere lo script "test_m_vol_seasonal.py".
+Tutti e tre i run passati. Il confronto tra "Run 1" e "Run 2" è significativo, infatti lo stesso host con un volume quattro volte superiore alle 23:00 viene correttamente identificato come anomalia, mentre alle 14:00 con 15 MB viene considerato normale. Senza il filtro contestuale, una baseline basata su tutta la settimana avrebbe avuto una mediana errata, producendo falsi positivi durante l'orario lavorativo e falsi negativi durante la notte.Il "Run 3" presenta un caso particolare dove l'host non ha storico nella categoria weekend perché lì il volume è sempre stato 0, quindi non vengono generati flussi e la baseline weekend risulta vuota. Il filtro `bucket_count >= MIN_BASELINE_HOURS` esclude correttamente l'host dal calcolo. Il sistema preferisce non valutare, per evitare il rischio di un falso positivo. Per ulteriori dettagli vedere lo script "test_m_vol_seasonal.py".
 
 ### 8.4 Considerazioni sul metodo
 
-Ogni livello di test ha fornito un contributo distinto, infatti il livello 1 valida la formula matematica, il livello 2 valida la query e l'integrazione con il database, il Livello 3 valida l'efficacia della scelta progettuale della baseline scelta.
+Ogni livello di test ha fornito un contributo distinto, infatti il livello 1 valida la formula matematica, il livello 2 valida la query e l'integrazione con il database, il livello 3 valida l'efficacia della scelta progettuale della baseline scelta.
