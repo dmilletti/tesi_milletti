@@ -2,3 +2,8 @@
 .venv/
 venv/
 ENV/
+
+# Bytecode compilato (cache automatica di Python)
+__pycache__/
+*.py[cod]
+*$py.class
