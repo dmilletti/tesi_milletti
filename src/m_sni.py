@@ -41,8 +41,11 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
+import argparse
 import clickhouse_connect
 from datetime import datetime, timezone
+
+from network_config import costruisci_filtro_lan
 
 
 # =============================================================================
@@ -59,14 +62,23 @@ CLICKHOUSE_PASSWORD = "0022"
 # Peso della metrica nel modello di scoring
 PESO_M_SNI = 50
 
-# Finestra temporale di analisi: guardiamo i flussi dell'ultima ora
-FINESTRA_ORE = 1
+# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
+# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
+# passando un valore esplicito alla funzione `calcola_m_sni()`.
+# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
+# questo default; il parametro serve a contenere il costo della query
+# quando si testa su tabelle molto grandi (miliardi di record).
+FINESTRA_MINUTI_DEFAULT = 60
 
 
 # =============================================================================
 # QUERY SQL
 # =============================================================================
 
+# La query SQL viene costruita dentro `calcola_m_sni()` perché dipende
+# dal parametro `finestra_minuti`, che può essere passato dinamicamente
+# (default = FINESTRA_MINUTI_DEFAULT).
+#
 # Implementa la formula matematica del piano operativo:
 #   A_sni = True -> M_sni = 1
 #
@@ -75,35 +87,6 @@ FINESTRA_ORE = 1
 # (NDPI_TLS_MISSING_SNI) del campo flow_risk_bitmap.
 #
 # A differenza di M_cert, qui controlliamo un SOLO bit specifico.
-
-QUERY_M_SNI = f"""
-SELECT
-    cli_ip AS host_ip,
-
-    -- Conteggio dei flussi senza SNI generati dall'host
-    countIf(bitTest(flow_risk_bitmap, 24) = 1) AS hits_missing_sni,
-
-    -- Se condizione è vera (hits_missing_sni > 0), restituisce 1; altrimenti 0
-    if(hits_missing_sni > 0, 1, 0) AS M_sni
-
-FROM flow_alerts_view
-WHERE
-    -- Finestra temporale: ultima ora di traffico
-    tstamp >= now() - INTERVAL {FINESTRA_ORE} HOUR
-
-    -- Pre-filtro: ci interessano solo i flussi con bit 24 attivo.
-    -- Sfruttiamo l'efficienza colonnare di ClickHouse per scartare
-    -- subito tutti gli altri flussi.
-    AND bitTest(flow_risk_bitmap, 24) = 1
-
-GROUP BY host_ip
-
--- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
-HAVING M_sni = 1
-
--- Ordiniamo per numero di violazioni (i più pericolosi prima)
-ORDER BY hits_missing_sni DESC
-"""
 
 
 # =============================================================================
@@ -124,9 +107,17 @@ def connetti_clickhouse():
     return client
 
 
-def calcola_m_sni(client):
+def calcola_m_sni(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
+
+    Parametri:
+    --finestra_minuti : ampiezza della finestra temporale di analisi in minuti.
+                        Default = FINESTRA_MINUTI_DEFAULT (60 minuti,)
+                        per essere compatibili con lo scoring.py esistente.
+                        Valori piccoli (es. 5-10) servono per testare la
+                        metrica su tabelle molto grandi (miliardi di
+                        record) contenendo l'intervallo della query.
 
     Il formato di ritorno è SIMMETRICO alle altre metriche:
     chiave = IP dell'host, valore = dizionario con i dettagli.
@@ -144,10 +135,52 @@ def calcola_m_sni(client):
         ...
     }
     """
+    # Costruzione della query con il parametro `finestra_minuti`.
+    # Il valore è un intero controllato (validato a monte da argparse
+    # o passato esplicitamente come argomento di funzione), quindi è
+    # sicuro inserirlo via f-string senza rischio di SQL injection.
+    #
+    # `filtro_lan` è costruito dal modulo condiviso network_config:
+    # limita l'analisi ai soli host della LAN interna (RFC 1918) sulla colonna
+    # cli_ip, che è il "soggetto" del flusso (il client che fa TLS senza SNI).
+    filtro_lan = costruisci_filtro_lan("cli_ip")
+
+    query = f"""
+    SELECT
+        cli_ip AS host_ip,
+
+        -- Conteggio dei flussi senza SNI generati dall'host
+        countIf(bitTest(flow_risk_bitmap, 24) = 1) AS hits_missing_sni,
+
+        -- Se condizione è vera (hits_missing_sni > 0), restituisce 1; altrimenti 0
+        if(hits_missing_sni > 0, 1, 0) AS M_sni
+
+    FROM flow_alerts_view
+    WHERE
+        -- Finestra temporale parametrica (default 60 minuti)
+        tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+
+        -- Filtro LAN interna: valutiamo solo host della rete monitorata
+        AND {filtro_lan}
+
+        -- Pre-filtro: ci interessano solo i flussi con bit 24 attivo.
+        -- Sfruttiamo l'efficienza colonnare di ClickHouse per scartare
+        -- subito tutti gli altri flussi.
+        AND bitTest(flow_risk_bitmap, 24) = 1
+
+    GROUP BY host_ip
+
+    -- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
+    HAVING M_sni = 1
+
+    -- Ordiniamo per numero di violazioni (i più pericolosi prima)
+    ORDER BY hits_missing_sni DESC
+    """
+
     risultati = {}
 
     # Esecuzione della query
-    righe = client.query(QUERY_M_SNI).result_rows
+    righe = client.query(query).result_rows
 
     # Ogni riga contiene: (host_ip, hits_missing_sni, M_sni)
     for host_ip, hits_missing_sni, m_sni in righe:
@@ -185,10 +218,38 @@ def main():
     """
     Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
     scoring.py importerà direttamente `calcola_m_sni()` dalla funzione sopra.
+
+    Esecuzione da CLI:
+        python m_sni.py                          # usa il default (60 minuti)
+        python m_sni.py --finestra-minuti 10     # finestra di 10 minuti
+        python m_sni.py --finestra-minuti 1440   # finestra di 24 ore
     """
+    # Parsing degli argomenti da riga di comando
+    parser = argparse.ArgumentParser(
+        description="Calcolo della metrica M_sni (SNI Evasion)."
+    )
+    parser.add_argument(
+        "--finestra-minuti",
+        type=int,
+        default=FINESTRA_MINUTI_DEFAULT,
+        help=(
+            f"Ampiezza in minuti della finestra temporale di analisi. "
+            f"Default: {FINESTRA_MINUTI_DEFAULT}. "
+            f"Valori più piccoli sono utili per testare la metrica su "
+            f"tabelle molto grandi (miliardi di record) limitando "
+            f"l'intervallo della query."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Validazione: finestra deve essere positiva
+    if args.finestra_minuti <= 0:
+        print(f"[ERRORE] --finestra-minuti deve essere > 0 (ricevuto: {args.finestra_minuti})")
+        return
+
     print(f"\n{'='*60}")
     print(f"  Avvio analisi M_sni - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
+    print(f"  Finestra temporale: ultimi {args.finestra_minuti} minuto/i")
     print(f"{'='*60}\n")
 
     # Connessione al database
@@ -199,16 +260,16 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Calcolo della metrica M_sni
+    # Calcolo della metrica M_sni con la finestra specificata
     try:
-        host_flaggati = calcola_m_sni(client)
+        host_flaggati = calcola_m_sni(client, finestra_minuti=args.finestra_minuti)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
     # Report dei risultati
     if not host_flaggati:
-        print("[OK] Nessun host flaggato - nessuna violazione SNI nell'ultima ora.\n")
+        print(f"[OK] Nessun host flaggato - nessuna violazione SNI negli ultimi {args.finestra_minuti} minuto/i.\n")
         return
 
     print(f"[!] {len(host_flaggati)} host flaggato/i dalla metrica M_sni:\n")

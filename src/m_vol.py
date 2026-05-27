@@ -15,7 +15,7 @@ Obiettivo:
 
 Formula operativa (vedere documento di decisioni progettuali per i dettagli):
 
-    MAD_eff = max( MAD, 0.10 * mediana, 1 MB )    <- triplo floor:
+    MAD_eff = max( MAD, 0.10 * mediana, 1 MB )    <- triplo limite per evitare div/0 e falsi positivi su host a baseline bassa:
                                                   - MAD reale
                                                   - 10% mediana (scala-relativo)
                                                   - 1 MB assoluto (anti-inattività)

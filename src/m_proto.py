@@ -12,30 +12,15 @@ Obiettivo:
     poi lo confronta con la porta utilizzata, se non corrisponde, scatta
     l'allarme.
 
-Logica con DIFFERENZIAZIONE per (protocollo, categoria porta):
-    Il piano operativo originale prevedeva peso fisso +30 punti.
-    Estendiamo la metrica con una matrice di pesi che riflette
-    il rischio di ogni combinazione (protocollo, porta):
+Logica:
+    Peso STATICO di +30 punti per qualsiasi mismatch protocollo/porta
+    rilevato da nDPI (bit 5 di flow_risk_bitmap acceso).
 
-      C2 MASCHERATO -> +50 punti
-        Protocollo di amministrazione remota (SSH, RDP, VNC, Telnet)
-        nascosto dentro porte web standard (80, 443, 8080, 8443).
-        È la classica tecnica per bypassare i firewall perimetrali.
-
-      TUNNEL CIFRATO SOSPETTO -> +40 punti
-        TLS/SSL su porte non-web (non in 80/443/altri web alt).
-        Tipico di tunnel VPN nascosti o protocolli di esfiltrazione.
-
-      MISMATCH GENERICO -> +30 punti
-        Qualsiasi altra discrepanza protocollo/porta non classificata
-        nei due casi sopra.
-
-      LIKELY DEV SERVER -> +15 punti
-        HTTP su porte web alternative comuni (3000, 4200, 5000, 5173,
-        8000, 8080, 8443, 8888). Non filtriamo questo caso (un attaccante
-        potrebbe usare queste porte di proposito), ma abbassiamo il peso
-        perché è statisticamente il più comune falso positivo in ambienti
-        di sviluppo.
+    Mantenere il peso basso (+30) è coerente con il fatto che un
+    mismatch protocollo/porta è un segnale strutturale debole: nDPI
+    dice "c'è qualcosa di strano qui" ma non "è un attacco". La
+    metrica da sola lascia l'host in zona gialla; per portarlo in
+    rosso serve il concorso di un'altra metrica.
 
 Frequenza di esecuzione:
     Event-driven (metrica deterministica): lo script va eseguito ogni ora
@@ -45,6 +30,7 @@ Fonte dei dati:
     Tabella `flow_alerts_view` di ntopng su ClickHouse.
     - Bit 5 del flow_risk_bitmap: NDPI_KNOWN_PROTOCOL_ON_NON_STANDARD_PORT
     - Protocollo reale estratto dal JSON: alerts['30']['proto.ndpi']
+      (report per dettaglio diagnostico)
 
 Soglie di rischio dello score finale S(h):
     Verde  ->  0-29  punti  (host sicuro)
@@ -53,8 +39,11 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
+import argparse
 import clickhouse_connect
 from datetime import datetime, timezone
+
+from network_config import costruisci_filtro_lan
 
 
 # =============================================================================
@@ -68,154 +57,41 @@ CLICKHOUSE_DATABASE = "ntopng"
 CLICKHOUSE_USER     = "default"
 CLICKHOUSE_PASSWORD = "0022"
 
-# Pesi differenziati per categoria di mismatch
-PESO_C2_MASCHERATO       = 50   # Protocollo remoto su porta web standard
-PESO_TUNNEL_CIFRATO      = 40   # TLS su porte non-web
-PESO_MISMATCH_GENERICO   = 30   # Altri casi
-PESO_LIKELY_DEV_SERVER   = 15   # HTTP su porte web alternative
+# Peso della metrica nel modello di scoring
+# Statico: lo stesso per qualsiasi mismatch protocollo/porta rilevato da nDPI.
+PESO_M_PROTO = 30
 
-# Finestra temporale di analisi: ultima ora
-FINESTRA_ORE = 1 # per test possiamo allargare a 24 ore
+# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
+# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
+# passando un valore esplicito alla funzione `calcola_m_proto()`.
+# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
+# questo default; il parametro serve a contenere il costo della query
+# quando si testa su tabelle molto grandi (miliardi di record).
+FINESTRA_MINUTI_DEFAULT = 60
 
 
 # =============================================================================
-# QUERY SQL - Versione ottimizzata con CTE
+# QUERY SQL
 # =============================================================================
 
-# La query implementa la formula del piano operativo:
+# La query SQL viene costruita dentro `calcola_m_proto()` perché dipende
+# dal parametro `finestra_minuti`, che può essere passato dinamicamente
+# (default = FINESTRA_MINUTI_DEFAULT).
+#
+# La query implementa la formula del piano operativo originale:
 #   A_proto = True -> M_proto = 1
-# estesa con differenziazione dei pesi per (protocollo reale, categoria porta).
+# con peso STATICO assegnato dallo script Python (PESO_M_PROTO = 30)
+# moltiplicato per M_proto.
 #
 # Logica:
 # 1) Filtro su bit 5 di flow_risk_bitmap (NDPI_KNOWN_PROTOCOL_ON_NON_STANDARD_PORT)
 # 2) Estrazione del protocollo reale dal JSON (proto.ndpi nell'oggetto alerts[30])
-# 3) multiIf() che classifica il caso e assegna il peso
-# 4) Aggregazione per host: max(peso), se un host ha più mismatch, prevale il caso più grave
+#    per il REPORT.
+# 3) Aggregazione per host: count(), uniqExact() sulle combinazioni
 #
-# Strutturazione in due fasi tramite CTE (Common Table Expression):
-# - FASE 1 (CTE "dati_filtrati_e_classificati"): applica i filtri WHERE,
-#   estrae proto.ndpi dal JSON e calcola peso/categoria una sola volta per riga
-# - FASE 2 (SELECT esterno): aggrega per host i valori pre-calcolati,
-#   senza più necessità di parsing JSON o di rivalutare multiIf
-
-QUERY_M_PROTO = f"""
-
--- FASE 1 - CTE "dati_filtrati_e_classificati"
--- Per ogni riga filtrata:
--- - estrae proto.ndpi una SOLA volta dal JSON
--- - calcola il peso applicabile alla riga
--- - calcola la categoria testuale corrispondente
-
--- Il risultato è un dataset intermedio con tutti i valori già pronti
--- per l'aggregazione finale, senza più necessità di parsing JSON
--- o di rivalutare i multiIf.
-
-WITH dati_filtrati_e_classificati AS (
-    SELECT
-        cli_ip AS host_ip,
-        srv_port,
-
-        -- Estrazione UNICA del protocollo reale rilevato da nDPI
-        JSONExtractString(json, 'alerts', '30', 'proto.ndpi') AS proto_ndpi,
-
-        -- Calcolo del peso per la singola riga (valutato 1 volta sola)
-        -- multiIf è l'equivalente ClickHouse di if/elif/elif/else
-        multiIf(
-            -- Caso 1: C2 mascherato -> +50
-            -- protocollo remoto (SSH/RDP/VNC/Telnet) nascosto su porta web
-            proto_ndpi IN ('SSH', 'RDP', 'VNC', 'Telnet')
-                AND srv_port IN (80, 443, 8080, 8443),
-            {PESO_C2_MASCHERATO},
-
-            -- Caso 2: tunnel cifrato -> +40
-            -- TLS/SSL/QUIC su porte non-web (escluse le web alternative comuni)
-            proto_ndpi IN ('TLS', 'SSL', 'QUIC')
-                AND srv_port NOT IN (80, 443, 8080, 8443, 8888,
-                                     3000, 4200, 5000, 5173, 8000),
-            {PESO_TUNNEL_CIFRATO},
-
-            -- Caso 3: likely dev server -> +15
-            -- HTTP su porte alternative comuni (Vite, React, Django, ecc.)
-            proto_ndpi = 'HTTP'
-                AND srv_port IN (3000, 4200, 5000, 5173, 8000, 8080, 8443, 8888),
-            {PESO_LIKELY_DEV_SERVER},
-
-            -- Caso 4 (default): mismatch generico -> +30
-            -- Qualsiasi altra combinazione protocollo/porta
-            {PESO_MISMATCH_GENERICO}
-        ) AS penalita_singola,
-
-        -- Categoria testuale corrispondente alla riga (per il report)
-        -- IMPORTANTE: la sequenza dei casi deve essere IDENTICA a quella
-        -- del calcolo del peso sopra, altrimenti peso e categoria si disallineano.
-        -- Da tenere sincronizzati.
-        multiIf(
-            proto_ndpi IN ('SSH', 'RDP', 'VNC', 'Telnet')
-                AND srv_port IN (80, 443, 8080, 8443),
-            'C2 MASCHERATO (protocollo remoto su porta web)',
-
-            proto_ndpi IN ('TLS', 'SSL', 'QUIC')
-                AND srv_port NOT IN (80, 443, 8080, 8443, 8888,
-                                     3000, 4200, 5000, 5173, 8000),
-            'TUNNEL CIFRATO SOSPETTO (TLS su porta non-web)',
-
-            proto_ndpi = 'HTTP'
-                AND srv_port IN (3000, 4200, 5000, 5173, 8000, 8080, 8443, 8888),
-            'LIKELY DEV SERVER (HTTP su porta alternativa)',
-
-            'MISMATCH GENERICO (altra combinazione protocollo/porta)'
-        ) AS categoria_singola
-
-    FROM flow_alerts_view
-    WHERE
-        -- Filtro 1: finestra temporale (ultima ora)
-        tstamp >= now() - INTERVAL {FINESTRA_ORE} HOUR
-
-        -- Filtro 2: bit 5 di flow_risk_bitmap acceso (NDPI_KNOWN_PROTOCOL_ON_NON_STANDARD_PORT)
-        -- Operazione binaria O(1), efficientissima sul DB colonnare
-        AND bitTest(flow_risk_bitmap, 5) = 1
-
-        -- Filtro 3: solo host della LAN interna (coerenza con altre metriche)
-        -- AND cli_location = 1 (per ora commentato)
-)
-
--- FASE 2 - Aggregazione finale per host
-
--- Opera sul risultato intermedio della CTE. Tutti i valori sono già
--- calcolati riga per riga, quindi qui si tratta solo di aggregarli.
--- Nessun JSONExtract, nessuna logica di classificazione duplicata.
-
-SELECT
-    host_ip,
-
-    -- Numero totale di mismatch rilevati per l'host
-    count() AS hits_totali,
-
-    -- Numero di combinazioni distinte (protocollo, porta) osservate
-    uniqExact(concat(proto_ndpi, ':', toString(srv_port))) AS combinazioni_distinte,
-
-    -- Lista delle combinazioni (max 10, per evitare report giganteschi)
-    arraySlice(
-        groupUniqArray(concat(proto_ndpi, ' su porta ', toString(srv_port))),
-        1, 10
-    ) AS lista_mismatch,
-
-    -- Peso massimo applicabile: prevale lo scenario peggiore per l'host
-    max(penalita_singola) AS penalita_calcolata,
-
-    -- Categoria corrispondente al peso massimo
-    -- argMax(valore, ordinatore): restituisce il VALORE della riga che ha l'ORDINATORE più alto.
-    -- Qui sono coerenti per costruzione perché peso e categoria sono pre-calcolati nella stessa riga della CTE.
-    argMax(categoria_singola, penalita_singola) AS categoria_dominante,
-
-    -- M_proto si attiva se l'aggregazione ha trovato almeno una riga
-    -- per costruzione: se l'host è in questo insieme result, ha avuto >= 1 hit
-    1 AS M_proto
-
-FROM dati_filtrati_e_classificati
-GROUP BY host_ip
-ORDER BY penalita_calcolata DESC, hits_totali DESC
-"""
+# Struttura in due fasi tramite CTE:
+# - FASE 1: filtro + estrazione proto_ndpi dal JSON una sola volta per riga
+# - FASE 2: aggregazione per host (count, distinct, lista mismatch)
 
 
 # =============================================================================
@@ -236,9 +112,17 @@ def connetti_clickhouse():
     return client
 
 
-def calcola_m_proto(client):
+def calcola_m_proto(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
+
+    Parametri:
+        finestra_minuti : ampiezza della finestra temporale di analisi in minuti.
+                          Default = FINESTRA_MINUTI_DEFAULT (60 minuti)
+                          per essere compatibili con lo scoring.py esistente.
+                          Valori piccoli (es. 5-10) servono per testare la
+                          metrica su tabelle molto grandi (miliardi di
+                          record) contenendo l'intervallo della query.
 
     Il formato di ritorno è SIMMETRICO alle altre metriche:
     chiave = IP dell'host, valore = dizionario con i dettagli.
@@ -250,31 +134,95 @@ def calcola_m_proto(client):
             "hits_totali":           5,
             "combinazioni_distinte": 2,
             "lista_mismatch":     ['SSH su porta 443', 'HTTP su porta 8888'],
-            "categoria_dominante": 'C2 MASCHERATO (protocollo remoto su porta web)',
-            "penalita":           50,
+            "penalita":           30,   <- peso statico (PESO_M_PROTO)
             "timestamp":          "2026-05-15T19:00:00+00:00"
         },
         ...
     }
     """
+    # Costruzione della query con il parametro `finestra_minuti`.
+    # Il valore è un intero controllato (validato a monte da argparse
+    # o passato esplicitamente come argomento di funzione), quindi è
+    # sicuro inserirlo via f-string senza rischio di SQL injection.
+    #
+    # `filtro_lan` è costruito dal modulo condiviso network_config: limita
+    # l'analisi ai soli host della LAN interna (RFC 1918) sulla colonna
+    # cli_ip, che è il "soggetto" del flusso. Applicato dentro la CTE
+    # così la FASE 2 lavora già su un dataset filtrato.
+    filtro_lan = costruisci_filtro_lan("cli_ip")
+
+    query = f"""
+
+    -- FASE 1 - CTE "dati_filtrati"
+    -- Filtro temporale + bit 5 acceso (mismatch protocollo/porta),
+    -- ed estrazione del protocollo reale dal JSON UNA SOLA volta per riga.
+
+    WITH dati_filtrati AS (
+        SELECT
+            cli_ip AS host_ip,
+            srv_port,
+
+            -- Estrazione UNICA del protocollo reale rilevato da nDPI
+            -- (usata solo per il REPORT, non più per pesare)
+            JSONExtractString(json, 'alerts', '30', 'proto.ndpi') AS proto_ndpi
+
+        FROM flow_alerts_view
+        WHERE
+            -- Filtro 1: finestra temporale parametrica (default 60 minuti)
+            tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+
+            -- Filtro 2: bit 5 di flow_risk_bitmap acceso
+            -- (NDPI_KNOWN_PROTOCOL_ON_NON_STANDARD_PORT)
+            -- Operazione binaria O(1), efficientissima sul DB colonnare
+            AND bitTest(flow_risk_bitmap, 5) = 1
+
+            -- Filtro 3: LAN interna (classifichiamo solo host della rete monitorata)
+            AND {filtro_lan}
+    )
+
+    -- FASE 2 - Aggregazione finale per host
+    -- Nessuna logica di pesatura: il peso lo applica Python (PESO_M_PROTO).
+
+    SELECT
+        host_ip,
+
+        -- Numero totale di mismatch rilevati per l'host
+        count() AS hits_totali,
+
+        -- Numero di combinazioni distinte (protocollo, porta) osservate
+        uniqExact(concat(proto_ndpi, ':', toString(srv_port))) AS combinazioni_distinte,
+
+        -- Lista delle combinazioni (max 10, per evitare report giganteschi)
+        arraySlice(
+            groupUniqArray(concat(proto_ndpi, ' su porta ', toString(srv_port))),
+            1, 10
+        ) AS lista_mismatch,
+
+        -- M_proto si attiva se l'aggregazione ha trovato almeno una riga
+        -- (per costruzione: se l'host è in questo result-set, ha >= 1 hit)
+        1 AS M_proto
+
+    FROM dati_filtrati
+    GROUP BY host_ip
+    ORDER BY hits_totali DESC
+    """
+
     risultati = {}
 
     # Esecuzione della query
-    righe = client.query(QUERY_M_PROTO).result_rows
+    righe = client.query(query).result_rows
 
     # Ogni riga contiene:
-    # (host_ip, hits_totali, combinazioni_distinte, lista_mismatch,
-    #  penalita_calcolata, categoria_dominante, M_proto)
-    for (host_ip, hits_totali, combinazioni_distinte, lista_mismatch,
-         penalita, categoria, m_proto) in righe:
+    # (host_ip, hits_totali, combinazioni_distinte, lista_mismatch, M_proto)
+    for (host_ip, hits_totali, combinazioni_distinte,
+         lista_mismatch, m_proto) in righe:
 
         risultati[host_ip] = {
             "M_proto":               m_proto,
             "hits_totali":           hits_totali,
             "combinazioni_distinte": combinazioni_distinte,
             "lista_mismatch":        list(lista_mismatch),
-            "categoria_dominante":   categoria,
-            "penalita":              penalita,
+            "penalita":              PESO_M_PROTO * m_proto,  # 30 se M_proto=1, 0 altrimenti
             "timestamp":             datetime.now(timezone.utc).isoformat()
         }
 
@@ -291,7 +239,6 @@ def stampa_report(host_ip: str, dati: dict):
     print("=" * 70)
     print(f"  Timestamp             : {dati['timestamp']}")
     print(f"  M_proto               : {dati['M_proto']} (attiva)")
-    print(f"  Categoria dominante   : {dati['categoria_dominante']}")
     print(f"  Mismatch rilevati     : {dati['lista_mismatch']}")
     print(f"  Combinazioni distinte : {dati['combinazioni_distinte']}")
     print(f"  Hit totali            : {dati['hits_totali']}")
@@ -307,15 +254,39 @@ def main():
     """
     Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
     scoring.py importerà direttamente `calcola_m_proto()` dalla funzione sopra.
+
+    Esecuzione da CLI:
+        python m_proto.py                          # usa il default (60 minuti)
+        python m_proto.py --finestra-minuti 10     # finestra di 10 minuti
+        python m_proto.py --finestra-minuti 1440   # finestra di 24 ore
     """
+    # Parsing degli argomenti da riga di comando
+    parser = argparse.ArgumentParser(
+        description="Calcolo della metrica M_proto (Non-standard Port/Protocol)."
+    )
+    parser.add_argument(
+        "--finestra-minuti",
+        type=int,
+        default=FINESTRA_MINUTI_DEFAULT,
+        help=(
+            f"Ampiezza in minuti della finestra temporale di analisi. "
+            f"Default: {FINESTRA_MINUTI_DEFAULT}. "
+            f"Valori più piccoli sono utili per testare la metrica su "
+            f"tabelle molto grandi (miliardi di record) limitando "
+            f"l'intervallo della query."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Validazione: finestra deve essere positiva
+    if args.finestra_minuti <= 0:
+        print(f"[ERRORE] --finestra-minuti deve essere > 0 (ricevuto: {args.finestra_minuti})")
+        return
+
     print(f"\n{'='*70}")
     print(f"  Avvio analisi M_proto - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
-    print(f"  Pesi differenziati per categoria di mismatch:")
-    print(f"    C2 MASCHERATO (SSH/RDP/VNC su 80/443/8080/8443):  +{PESO_C2_MASCHERATO}")
-    print(f"    TUNNEL CIFRATO (TLS su porte non-web):            +{PESO_TUNNEL_CIFRATO}")
-    print(f"    MISMATCH GENERICO (altri casi):                   +{PESO_MISMATCH_GENERICO}")
-    print(f"    LIKELY DEV SERVER (HTTP su porte alternative):    +{PESO_LIKELY_DEV_SERVER}")
+    print(f"  Finestra temporale: ultimi {args.finestra_minuti} minuto/i")
+    print(f"  Peso statico: +{PESO_M_PROTO} punti per qualsiasi mismatch protocollo/porta")
     print(f"{'='*70}\n")
 
     # Connessione al database
@@ -326,16 +297,16 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Calcolo della metrica M_proto
+    # Calcolo della metrica M_proto con la finestra specificata
     try:
-        host_flaggati = calcola_m_proto(client)
+        host_flaggati = calcola_m_proto(client, finestra_minuti=args.finestra_minuti)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
     # Report dei risultati
     if not host_flaggati:
-        print("[OK] Nessun host flagged - nessun mismatch protocollo/porta nell'ultima ora.\n")
+        print(f"[OK] Nessun host flagged - nessun mismatch protocollo/porta negli ultimi {args.finestra_minuti} minuto/i.\n")
         return
 
     print(f"[!] {len(host_flaggati)} host flagged dalla metrica M_proto:\n")

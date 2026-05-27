@@ -43,8 +43,11 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
+import argparse
 import clickhouse_connect
 from datetime import datetime, timezone
+
+from network_config import costruisci_filtro_lan
 
 
 # =============================================================================
@@ -61,15 +64,24 @@ CLICKHOUSE_PASSWORD = "0022"
 # Peso della metrica nel modello di scoring
 PESO_M_CERT = 40
 
-# Finestra temporale di analisi: guardiamo i flussi dell'ultima ora
-FINESTRA_ORE = 1  # per test possiamo allargare a 24 ore
+# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
+# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
+# passando un valore esplicito alla funzione `calcola_m_cert()`.
+# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
+# questo default; il parametro serve a contenere il costo della query
+# quando si testa su tabelle molto grandi (miliardi di record).
+FINESTRA_MINUTI_DEFAULT = 60
 
 
 # =============================================================================
 # QUERY SQL
 # =============================================================================
 
-# Questa query implementa la formula matematica del piano operativo:
+# La query SQL viene costruita dentro `calcola_m_cert()` perché dipende
+# dal parametro `finestra_minuti`, che può essere passato dinamicamente
+# (default = FINESTRA_MINUTI_DEFAULT).
+#
+# Implementa la formula matematica del piano operativo:
 #   A_cert = True -> M_cert = 1
 # dove A_cert è l'insieme degli allarmi nativi di ntopng sui certificati.
 #
@@ -85,47 +97,6 @@ FINESTRA_ORE = 1  # per test possiamo allargare a 24 ore
 #
 # La clausola GROUP BY + HAVING aggrega per host e mantiene solo
 # quelli con almeno un bit di certificato attivo.
-
-QUERY_M_CERT = f"""
-SELECT
-    cli_ip AS host_ip,
-
-    -- Conteggio per ogni tipo di anomalia di certificato
-    countIf(bitTest(flow_risk_bitmap, 6)  = 1) AS hits_self_signed,
-    countIf(bitTest(flow_risk_bitmap, 9)  = 1) AS hits_expired,
-    countIf(bitTest(flow_risk_bitmap, 10) = 1) AS hits_mismatch,
-    countIf(bitTest(flow_risk_bitmap, 29) = 1) AS hits_sha1,
-
-    -- Hit totali su qualsiasi bit di certificato
-    hits_self_signed + hits_expired + hits_mismatch + hits_sha1 AS hits_totali,
-
-    -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
-    if(hits_totali > 0, 1, 0) AS M_cert
-
-FROM flow_alerts_view
-WHERE
-    -- Finestra temporale: ultima ora di traffico
-    tstamp >= now() - INTERVAL {FINESTRA_ORE} HOUR
-    -- AND cli_location = 1   -- solo host della LAN interna (per ora commentato)
-
-    -- Pre-filtro: ci interessano SOLO i flussi con almeno un bit di
-    -- certificato attivo. Sfruttiamo l'efficienza colonnare di ClickHouse
-    -- per scartare subito tutti gli altri flussi.
-    AND (
-        bitTest(flow_risk_bitmap, 6)  = 1
-        OR bitTest(flow_risk_bitmap, 9)  = 1
-        OR bitTest(flow_risk_bitmap, 10) = 1
-        OR bitTest(flow_risk_bitmap, 29) = 1
-    )
-
-GROUP BY host_ip
-
--- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
-HAVING M_cert = 1
-
--- Ordiniamo per gravità (host con più anomalie cert prima)
-ORDER BY hits_totali DESC
-"""
 
 
 # =============================================================================
@@ -146,9 +117,18 @@ def connetti_clickhouse():
     return client
 
 
-def calcola_m_cert(client):
+def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
+
+    Parametri:
+        finestra_minuti : ampiezza della finestra temporale di analisi in minuti.
+                          Default = FINESTRA_MINUTI_DEFAULT (60 minuti, ovvero
+                          l'ultima ora) per essere compatibili con lo
+                          scoring.py esistente.
+                          Valori piccoli (es. 5-10) servono per testare la
+                          metrica su tabelle molto grandi (miliardi di
+                          record) contenendo l'intervallo della query.
 
     Il formato di ritorno è SIMMETRICO a calcola_m_rep() di m_rep.py:
     chiave = IP dell'host, valore = dizionario con i dettagli.
@@ -170,10 +150,63 @@ def calcola_m_cert(client):
         ...
     }
     """
+    # Costruzione della query con il parametro `finestra_minuti`.
+    # Il valore è un intero controllato (validato a monte da argparse
+    # o passato esplicitamente come argomento di funzione), quindi è
+    # sicuro inserirlo via f-string senza rischio di SQL injection.
+    #
+    # `filtro_lan` è costruito dal modulo condiviso network_config:
+    #  limita l'analisi ai soli host della LAN interna (RFC 1918) sulla colonna
+    #  cli_ip, che è il "soggetto" del flusso.
+    filtro_lan = costruisci_filtro_lan("cli_ip")
+
+    query = f"""
+    SELECT
+        cli_ip AS host_ip,
+
+        -- Conteggio per ogni tipo di anomalia di certificato
+        countIf(bitTest(flow_risk_bitmap, 6)  = 1) AS hits_self_signed,
+        countIf(bitTest(flow_risk_bitmap, 9)  = 1) AS hits_expired,
+        countIf(bitTest(flow_risk_bitmap, 10) = 1) AS hits_mismatch,
+        countIf(bitTest(flow_risk_bitmap, 29) = 1) AS hits_sha1,
+
+        -- Hit totali su qualsiasi bit di certificato
+        hits_self_signed + hits_expired + hits_mismatch + hits_sha1 AS hits_totali,
+
+        -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
+        if(hits_totali > 0, 1, 0) AS M_cert
+
+    FROM flow_alerts_view
+    WHERE
+        -- Finestra temporale parametrica (default 60 minuti)
+        tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+
+        -- Filtro LAN interna: classifichiamo solo host della rete monitorata
+        AND {filtro_lan}
+
+        -- Pre-filtro: ci interessano SOLO i flussi con almeno un bit di
+        -- certificato attivo. Sfruttiamo l'efficienza colonnare di ClickHouse
+        -- per scartare subito tutti gli altri flussi.
+        AND (
+            bitTest(flow_risk_bitmap, 6)  = 1
+            OR bitTest(flow_risk_bitmap, 9)  = 1
+            OR bitTest(flow_risk_bitmap, 10) = 1
+            OR bitTest(flow_risk_bitmap, 29) = 1
+        )
+
+    GROUP BY host_ip
+
+    -- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
+    HAVING M_cert = 1
+
+    -- Ordiniamo per gravità (host con più anomalie cert prima)
+    ORDER BY hits_totali DESC
+    """
+
     risultati = {}
 
     # Esecuzione della query
-    righe = client.query(QUERY_M_CERT).result_rows
+    righe = client.query(query).result_rows
 
     # Ogni riga contiene:
     # (host_ip, hits_self_signed, hits_expired, hits_mismatch,
@@ -224,10 +257,38 @@ def main():
     """
     Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata:
     scoring.py importerà direttamente `calcola_m_cert()` dalla funzione sopra.
+
+    Esecuzione da CLI:
+        python m_cert.py                          # usa il default (60 minuti)
+        python m_cert.py --finestra-minuti 10     # finestra di 10 minuti
+        python m_cert.py --finestra-minuti 1440   # finestra di 24 ore
     """
+    # Parsing degli argomenti da riga di comando
+    parser = argparse.ArgumentParser(
+        description="Calcolo della metrica M_cert (TLS Certificate Anomalies)."
+    )
+    parser.add_argument(
+        "--finestra-minuti",
+        type=int,
+        default=FINESTRA_MINUTI_DEFAULT,
+        help=(
+            f"Ampiezza in minuti della finestra temporale di analisi. "
+            f"Default: {FINESTRA_MINUTI_DEFAULT}. "
+            f"Valori più piccoli sono utili per testare la metrica su "
+            f"tabelle molto grandi (miliardi di record) limitando "
+            f"l'intervallo della query."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Validazione: finestra deve essere positiva
+    if args.finestra_minuti <= 0:
+        print(f"[ERRORE] --finestra-minuti deve essere > 0 (ricevuto: {args.finestra_minuti})")
+        return
+
     print(f"\n{'='*60}")
     print(f"  Avvio analisi M_cert - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
+    print(f"  Finestra temporale: ultimi {args.finestra_minuti} minuto/i")
     print(f"{'='*60}\n")
 
     # Connessione al database
@@ -238,16 +299,16 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Calcolo della metrica M_cert
+    # Calcolo della metrica M_cert con la finestra specificata
     try:
-        flagged_host = calcola_m_cert(client)
+        flagged_host = calcola_m_cert(client, finestra_minuti=args.finestra_minuti)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
     # Report dei risultati
     if not flagged_host:
-        print("[OK] Nessun host flagged - nessuna anomalia di certificato nell'ultima ora.\n")
+        print(f"[OK] Nessun host flagged - nessuna anomalia di certificato negli ultimi {args.finestra_minuti} minuto/i.\n")
         return
 
     print(f"[!] {len(flagged_host)} host flagged dalla metrica M_cert:\n")

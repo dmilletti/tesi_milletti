@@ -47,8 +47,11 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
+import argparse
 import clickhouse_connect
 from datetime import datetime, timezone
+
+from network_config import costruisci_filtro_lan
 
 
 # =============================================================================
@@ -72,14 +75,23 @@ PESO_SRV_PERSISTENTE = 50   # 3+ hit verso server BL
 PESO_CLI_RARO   = 5    # 1-10 hit da client BL
 PESO_CLI_MIRATO      = 15   # 11+ hit da client BL
 
-# Finestra temporale di analisi: guardiamo i flussi dell'ultima ora
-FINESTRA_ORE = 1
+# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
+# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
+# passando un valore esplicito alla funzione `calcola_m_rep()`.
+# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
+# questo default; il parametro serve a contenere il costo della query
+# quando si testa su tabelle molto grandi (miliardi di record).
+FINESTRA_MINUTI_DEFAULT = 60
 
 
 # =============================================================================
 # QUERY SQL
 # =============================================================================
 
+# La query SQL viene costruita dentro `calcola_m_rep()` perché dipende
+# dal parametro `finestra_minuti`, che può essere passato dinamicamente
+# (default = FINESTRA_MINUTI_DEFAULT).
+#
 # La query applica la differenziazione su entrambi i livelli (direzione e
 # intensità) direttamente lato database, evitando di trasferire dati grezzi
 # allo script Python.
@@ -92,58 +104,9 @@ FINESTRA_ORE = 1
 #   - altrimenti                    -> 0
 # Prima si valuta SRV, e solo se non si attiva si scende sul caso CLI.
 #
-# Filtro CLIENT_LOCATION = 1: consideriamo solo host della LAN interna (per ora commentato)
-
-QUERY_M_REP = f"""
-SELECT
-    IPv4NumToString(IPV4_SRC_ADDR) AS host_ip,
-    countIf(IS_SRV_BLACKLISTED = 1) AS hits_srv_blacklisted,
-    countIf(IS_CLI_BLACKLISTED = 1) AS hits_cli_blacklisted,
-
-    -- Hit totali (informativo, non usato per il peso)
-    hits_srv_blacklisted + hits_cli_blacklisted AS hits_totali,
-
-    -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
-    if(hits_totali > 0, 1, 0) AS M_rep,
-
-    -- Penalità DIFFERENZIATA su DIREZIONE e INTENSITÀ
-    multiIf(
-        hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, {PESO_SRV_PERSISTENTE},
-        hits_srv_blacklisted >= 1,                        {PESO_SRV_ISOLATO},
-        hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      {PESO_CLI_MIRATO},
-        hits_cli_blacklisted >= 1,                        {PESO_CLI_RARO},
-        0
-    ) AS penalita_calcolata,
-
-    -- Scenario testuale per il report
-    multiIf(
-        hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, 'COMPROMISSIONE PERSISTENTE (C2 attivo - hits ripetuti)',
-        hits_srv_blacklisted >= 1,                        'CONTATTO ISOLATO a server BL (possibile beacon iniziale)',
-        hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      'SCANSIONE MIRATA (target persistente)',
-        hits_cli_blacklisted >= 1,                        'SCANSIONE RARA (rumore di fondo Internet)',
-        'N/A'
-    ) AS scenario
-
-FROM flows
-WHERE
-    -- Finestra temporale: ultima ora di traffico
-    FIRST_SEEN >= now() - INTERVAL {FINESTRA_ORE} HOUR
-
-    -- Escludiamo i flussi IPv6 (IPV4_SRC_ADDR = 0 nei flussi IPv6 puri)
-    AND IPV4_SRC_ADDR != 0
-
-    -- Consideriamo SOLO host della LAN interna (per ora commentato)
-    -- Per AND CLIENT_LOCATION = 1
-
-GROUP BY host_ip
-
--- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
-HAVING M_rep = 1
-
--- Ordinamento: prima i casi più gravi (penalità maggiore),
--- poi a parità di gravità i più ripetitivi
-ORDER BY penalita_calcolata DESC, hits_totali DESC
-"""
+# Filtro LAN interna: applicato tramite il modulo condiviso network_config
+# (vedi `filtro_lan` nel corpo della funzione). Classifichiamo solo gli host della
+# rete monitorata (RFC 1918), che sono il "soggetto" della metrica.
 
 
 # =============================================================================
@@ -164,9 +127,18 @@ def connetti_clickhouse():
     return client
 
 
-def calcola_m_rep(client):
+def calcola_m_rep(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     """
     Esegue la query su ClickHouse e restituisce un dizionario con i risultati.
+
+    Parametri:
+        finestra_minuti : ampiezza della finestra temporale di analisi in minuti.
+                          Default = FINESTRA_MINUTI_DEFAULT (60 minuti, ovvero
+                          l'ultima ora) per essere compatibili con lo
+                          scoring.py esistente.
+                          Valori piccoli (es. 5-10) servono per testare la
+                          metrica su tabelle molto grandi (miliardi di
+                          record) contenendo l'intervallo della query.
 
     Il formato del dizionario è simmetrico a quello delle altre metriche
     per permettere a scoring.py di trattare tutte le metriche uniformemente.
@@ -185,10 +157,72 @@ def calcola_m_rep(client):
         ...
     }
     """
+    # Costruzione della query con il parametro `finestra_minuti`.
+    # Il valore è un intero controllato (validato a monte da argparse
+    # o passato esplicitamente come argomento di funzione), quindi è
+    # sicuro inserirlo via f-string senza rischio di SQL injection.
+    #
+    # `filtro_lan` è costruito dal modulo condiviso network_config. Qui la
+    # colonna IPV4_SRC_ADDR è di tipo UInt32 (formato compatto di ntopng),
+    # mentre isIPAddressInRange() richiede una stringa: convertiamo con
+    # IPv4NumToString() prima di passarla al filtro.
+    filtro_lan = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
+
+    query = f"""
+    SELECT
+        IPv4NumToString(IPV4_SRC_ADDR) AS host_ip,
+        countIf(IS_SRV_BLACKLISTED = 1) AS hits_srv_blacklisted,
+        countIf(IS_CLI_BLACKLISTED = 1) AS hits_cli_blacklisted,
+
+        -- Hit totali (informativo, non usato per il peso)
+        hits_srv_blacklisted + hits_cli_blacklisted AS hits_totali,
+
+        -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
+        if(hits_totali > 0, 1, 0) AS M_rep,
+
+        -- Penalità DIFFERENZIATA su DIREZIONE e INTENSITÀ
+        multiIf(
+            hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, {PESO_SRV_PERSISTENTE},
+            hits_srv_blacklisted >= 1,                        {PESO_SRV_ISOLATO},
+            hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      {PESO_CLI_MIRATO},
+            hits_cli_blacklisted >= 1,                        {PESO_CLI_RARO},
+            0
+        ) AS penalita_calcolata,
+
+        -- Scenario testuale per il report
+        multiIf(
+            hits_srv_blacklisted >= {SOGLIA_SRV_PERSISTENTE}, 'COMPROMISSIONE PERSISTENTE (C2 attivo - hits ripetuti)',
+            hits_srv_blacklisted >= 1,                        'CONTATTO ISOLATO a server BL (possibile beacon iniziale)',
+            hits_cli_blacklisted >= {SOGLIA_CLI_MIRATO},      'SCANSIONE MIRATA (target persistente)',
+            hits_cli_blacklisted >= 1,                        'SCANSIONE RARA (rumore di fondo Internet)',
+            'N/A'
+        ) AS scenario
+
+    FROM flows
+    WHERE
+        -- Finestra temporale parametrica (default 60 minuti)
+        FIRST_SEEN >= now() - INTERVAL {finestra_minuti} MINUTE
+
+        -- Escludiamo i flussi IPv6 (IPV4_SRC_ADDR = 0 nei flussi IPv6 puri)
+        AND IPV4_SRC_ADDR != 0
+
+        -- Filtro LAN interna: scoriamo solo host della rete monitorata
+        AND {filtro_lan}
+
+    GROUP BY host_ip
+
+    -- Mostriamo solo gli host che hanno effettivamente triggerato la metrica
+    HAVING M_rep = 1
+
+    -- Ordinamento: prima i casi più gravi (penalità maggiore),
+    -- poi a parità di gravità i più ripetitivi
+    ORDER BY penalita_calcolata DESC, hits_totali DESC
+    """
+
     risultati = {}
 
     # Esecuzione della query
-    righe = client.query(QUERY_M_REP).result_rows
+    righe = client.query(query).result_rows
 
     # Ogni riga contiene:
     # (host_ip, hits_srv, hits_cli, hits_totali, M_rep,
@@ -212,7 +246,7 @@ def calcola_m_rep(client):
 def stampa_report(host_ip: str, dati: dict):
     """
     Stampa un report leggibile per ogni host flagged dalla sola metrica.
-    Usato quando lo script è eseguito per testing..
+    Usato quando lo script è eseguito per testing.
     """
     print("=" * 70)
     print(f"  [ALLARME M_rep] {host_ip}")
@@ -235,10 +269,38 @@ def main():
     """
     Quando integreremo tutto in scoring.py, questa funzione NON verrà chiamata.
     scoring.py importerà direttamente `calcola_m_rep()` dalla funzione sopra.
+
+    Esecuzione da CLI:
+        python m_rep.py                          # usa il default (60 minuti)
+        python m_rep.py --finestra-minuti 10     # finestra di 10 minuti
+        python m_rep.py --finestra-minuti 1440   # finestra di 24 ore
     """
+    # Parsing degli argomenti da riga di comando
+    parser = argparse.ArgumentParser(
+        description="Calcolo della metrica M_rep (Destination Reputation)."
+    )
+    parser.add_argument(
+        "--finestra-minuti",
+        type=int,
+        default=FINESTRA_MINUTI_DEFAULT,
+        help=(
+            f"Ampiezza in minuti della finestra temporale di analisi. "
+            f"Default: {FINESTRA_MINUTI_DEFAULT}. "
+            f"Valori più piccoli sono utili per testare la metrica su "
+            f"tabelle molto grandi (miliardi di record) limitando "
+            f"l'intervallo della query."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Validazione: finestra deve essere positiva
+    if args.finestra_minuti <= 0:
+        print(f"[ERRORE] --finestra-minuti deve essere > 0 (ricevuto: {args.finestra_minuti})")
+        return
+
     print(f"\n{'='*70}")
     print(f"  Avvio analisi M_rep - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"  Finestra temporale: ultima {FINESTRA_ORE} ora")
+    print(f"  Finestra temporale: ultimi {args.finestra_minuti} minuto/i")
     print(f"  Pesi differenziati su direzione e intensità:")
     print(f"    SRV isolato (1-{SOGLIA_SRV_PERSISTENTE-1}): +{PESO_SRV_ISOLATO}     "
           f"SRV persistente ({SOGLIA_SRV_PERSISTENTE}+): +{PESO_SRV_PERSISTENTE}")
@@ -254,16 +316,16 @@ def main():
         print(f"[ERRORE] Impossibile connettersi a ClickHouse: {e}")
         return
 
-    # Calcolo della metrica M_rep
+    # Calcolo della metrica M_rep con la finestra specificata
     try:
-        flagged_host = calcola_m_rep(client)
+        flagged_host = calcola_m_rep(client, finestra_minuti=args.finestra_minuti)
     except Exception as e:
         print(f"[ERRORE] Errore durante l'esecuzione della query: {e}")
         return
 
     # Report dei risultati
     if not flagged_host:
-        print("[OK] Nessun host flagged - rete pulita nell'ultima ora.\n")
+        print(f"[OK] Nessun host flagged - rete pulita negli ultimi {args.finestra_minuti} minuto/i.\n")
         return
 
     print(f"[!] {len(flagged_host)} host flagged dalla metrica M_rep:\n")
