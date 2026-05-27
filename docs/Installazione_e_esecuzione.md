@@ -64,8 +64,17 @@ CLICKHOUSE_PASSWORD = "0022"
 È necessario modificare tali valori e adattarli alle specifiche del proprio ambiente per garantire la corretta instaurazione della sessione e prevenire errori di connessione durante l'esecuzione delle metriche. Di norma, l'unico parametro che richiede una variazione è la password di autenticazione.
 
 ## 5. Esecuzione degli script delle metriche
-Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile l'esecuzione dei singoli script Python lanciando da terminale il relativo comando:
+Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile testare i singoli script Python lanciando da terminale il relativo comando:
 
 ```bash
 python nome_script.py
 ```
+
+Questo comando avvia l'analisi basata sulla finestra temporale di default (1 ora). Se si desidera personalizzare l'arco temporale di osservazione, la metriche supportano un argomento da riga di comando:
+
+```bash
+python nome_script.py --finestra-minuti <numero_minuti>
+```
+ 
+**NOTA IMPORTANTE**:  
+La metrica *m_vol* non supporta finestre temporali dinamiche da CLI, questo perché lavora su bucket orari di un'ora. 
