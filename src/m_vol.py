@@ -214,7 +214,7 @@ baseline_grezza AS (
 -- CTE 3: mediane
 -- Per ogni host, calcola la mediana dei volumi orari sui bucket
 -- della baseline filtrata. Applica il filtro cold start; host con
--- meno di 48 bucket validi non hanno baseline statisticamente affidabile
+-- meno di 30 bucket validi non hanno baseline statisticamente affidabile
 -- e vengono esclusi dal calcolo.
 -- Restituisce una tabella con host_ip, v_mediano, bucket_count.
 -- =============================================================
@@ -227,7 +227,7 @@ mediane AS (
         count() AS bucket_count
     FROM baseline_grezza
     GROUP BY host_ip
-    -- Scarto gli host che hanno meno di 48 ore di baseline
+    -- Scarto gli host che hanno meno di 30 ore di baseline
     HAVING bucket_count >= {MIN_BASELINE_HOURS}
 ),
 
@@ -240,11 +240,12 @@ mediane AS (
 -- delle distanze assolute, in una seconda passata.
 -- Restituisce una tabella con host_ip, v_mediano, bucket_count, mad.
 -- =============================================================
+
 statistiche_baseline AS (
     SELECT
         bg.host_ip,
         -- Prendo una qualsiasi riga per host da mediane, tanto v_mediano e bucket_count
-        -- tanto sono costanti per host_ip (grazie al GROUP BY), quindi non importa quale prendo.
+        -- sono costanti per host_ip (grazie al GROUP BY), quindi non importa quale prendo.
         any(m.v_mediano)   AS v_mediano,
         any(m.bucket_count) AS bucket_count,
         median(abs(bg.v_bucket - m.v_mediano)) AS mad
@@ -296,7 +297,7 @@ SELECT
 
     -- Calcolo della MAD effettiva, per evitare div/0
     -- greatest(a, b) = max(a, b) in ClickHouse
-    greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO})   AS mad_eff,
+    greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS mad_eff,
 
     -- Z robusto direzionale: senza valore assoluto.
     -- Valori positivi -> traffico sopra mediana (potenziale esfiltrazione)
