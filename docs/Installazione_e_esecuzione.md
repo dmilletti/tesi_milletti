@@ -77,7 +77,7 @@ python nome_script.py --finestra-minuti <numero_minuti>
 ```
  
 **NOTA IMPORTANTE**:  
-La metrica *m_vol* non supporta finestre temporali dinamiche da CLI, questo perché lavora su bucket orari di un'ora. 
+La metrica *m_vol* e *m_fail* non supportano finestre temporali dinamiche da CLI, questo perché lavorano su bucket orari di un'ora. 
 
 ### 5.1 Esecuzione degli script di "test"
 Per eseguire gli script di validazione delle metriche statistiche ($M_{vol}​$ e $M_{fail}$​), oltre ai requisiti descritti nel paragrafo 5, è necessario configurare un utente dedicato con privilegi di scrittura sul database ClickHouse. Questo isolamento garantisce che i test end-to-end possano generare e distruggere le tabelle temporanee senza interferire con i flussi di produzione.
