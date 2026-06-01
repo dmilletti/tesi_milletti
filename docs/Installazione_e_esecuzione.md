@@ -63,8 +63,8 @@ CLICKHOUSE_PASSWORD = "0022"
 
 È necessario modificare tali valori e adattarli alle specifiche del proprio ambiente per garantire la corretta instaurazione della sessione e prevenire errori di connessione durante l'esecuzione delle metriche. Di norma, l'unico parametro che richiede una variazione è la password di autenticazione.
 
-## 5. Esecuzione degli script delle metriche
-Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile testare i singoli script Python lanciando da terminale il relativo comando:
+## 5. Esecuzione dello scoring finale e delle metriche singole
+Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile testare i **singoli script** Python lanciando da terminale il relativo comando:
 
 ```bash
 python nome_script.py
@@ -79,7 +79,14 @@ python nome_script.py --finestra-minuti <numero_minuti>
 **NOTA IMPORTANTE**:  
 La metrica *m_vol* e *m_fail* non supportano finestre temporali dinamiche da CLI, questo perché lavorano su bucket orari di un'ora. 
 
-### 5.1 Esecuzione degli script di "test"
+### 5.1 Esecuzione dello scoring finale
+Per eseguire il calcolo dello scoring finale, dopo aver soddisfatto i requisiti preliminari descritti nel paragrafo 5, è sufficiente avviare lo script dedicato digitando nel terminale il seguente comando:
+
+```bash
+python python scoring.py
+```
+
+### 5.2 Esecuzione degli script di "test"
 Per eseguire gli script di validazione delle metriche statistiche ($M_{vol}​$ e $M_{fail}$​), oltre ai requisiti descritti nel paragrafo 5, è necessario configurare un utente dedicato con privilegi di scrittura sul database ClickHouse. Questo isolamento garantisce che i test end-to-end possano generare e distruggere le tabelle temporanee senza interferire con i flussi di produzione.
 
 Dopo aver effettuato l'accesso alla CLI tramite clickhouse-client, è possibile creare l'utente ed assegnargli i permessi necessari eseguendo i seguenti comandi:
