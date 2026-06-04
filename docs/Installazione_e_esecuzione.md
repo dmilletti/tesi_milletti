@@ -50,7 +50,7 @@ deactivate
 ```
 
 ## 4. Modifica dei parametri di configurazione di clickhouse
-All'interno di ogni singolo script, sono presenti le costanti di configurazione per la connessione al database di ClickHouse:
+All'interno dello script di configurazione `config.py`, sono presenti le costanti di configurazione per la connessione al database di ClickHouse:
 
 ```bash
 # Parametri di connessione a ClickHouse
@@ -63,7 +63,14 @@ CLICKHOUSE_PASSWORD = "0022"
 
 È necessario modificare tali valori e adattarli alle specifiche del proprio ambiente per garantire la corretta instaurazione della sessione e prevenire errori di connessione durante l'esecuzione delle metriche. Di norma, l'unico parametro che richiede una variazione è la password di autenticazione.
 
-## 5. Esecuzione dello scoring finale e delle metriche singole
+## 5 Abilitazione metriche di ntopng
+All'interno del sistema di scoring viene utilizzato il segnale *"Server Port Detected"* fornito direttamente da ntopng. Di default questa metrica è disabilitata; pertanto, per far sì che il rilevamento di nuove porte server funzioni correttamente, è necessario abilitare l'opzione dalla dashboard (UI) di ntopng.
+
+Nello specifico, occorre navigare nel menu `Settings` $\rightarrow$ `Policies` $\rightarrow$ `Behavioural Checks`, inserire *"Server Port Detected"* nella barra di ricerca e attivare il relativo flag.
+
+Inoltre, dato che questo segnale richiede un periodo di apprendimento algoritmico per mappare le abitudini della rete, è possibile personalizzarne la durata dal menu: `Settings` $\rightarrow$ `Behavioural Analysis`, scorrendo la pagina fino alla voce *"Server Port Learning Period"*. Si consiglia di mantenere il valore predefinito proposto dal sistema.
+
+## 6. Esecuzione dello scoring finale e delle metriche singole
 Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile testare i **singoli script** Python lanciando da terminale il relativo comando:
 
 ```bash
@@ -79,19 +86,19 @@ python nome_script.py --finestra-minuti <numero_minuti>
 **NOTA IMPORTANTE**:  
 La metrica *m_vol* e *m_fail* non supportano finestre temporali dinamiche da CLI, questo perché lavorano su bucket orari di un'ora. 
 
-### 5.1 Esecuzione dello scoring finale
+### 6.1 Esecuzione dello scoring finale
 Per eseguire il calcolo dello scoring finale, dopo aver soddisfatto i requisiti preliminari descritti nel paragrafo 5, è sufficiente avviare lo script dedicato digitando nel terminale il seguente comando:
 
 ```bash
-python python scoring.py
+python scoring.py
 ```
 
-### 5.2 Esecuzione degli script di "test"
+### 6.2 Esecuzione degli script di "test"
 Per eseguire gli script di validazione delle metriche statistiche ($M_{vol}​$ e $M_{fail}$​), oltre ai requisiti descritti nel paragrafo 5, è necessario configurare un utente dedicato con privilegi di scrittura sul database ClickHouse. Questo isolamento garantisce che i test end-to-end possano generare e distruggere le tabelle temporanee senza interferire con i flussi di produzione.
 
 Dopo aver effettuato l'accesso alla CLI tramite clickhouse-client, è possibile creare l'utente ed assegnargli i permessi necessari eseguendo i seguenti comandi:
 
-```bash
+```sql
 CREATE USER IF NOT EXISTS tester 
 IDENTIFIED WITH plaintext_password BY 'test_password' 
 HOST LOCAL 
