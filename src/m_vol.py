@@ -50,20 +50,12 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
-import clickhouse_connect
 from datetime import datetime, timezone
-
+from config import connetti_clickhouse, costruisci_filtro_lan
 
 # =============================================================================
 # CONFIGURAZIONE
 # =============================================================================
-
-# Parametri di connessione a ClickHouse
-CLICKHOUSE_HOST     = "localhost"
-CLICKHOUSE_PORT     = 8123
-CLICKHOUSE_DATABASE = "ntopng"
-CLICKHOUSE_USER     = "default"
-CLICKHOUSE_PASSWORD = "0022"
 
 # Peso della metrica nel modello di scoring
 PESO_M_VOL = 20
@@ -137,6 +129,8 @@ GIORNI_WEEKEND = (6, 7)
 # JOIN tra volume_corrente e statistiche_baseline,
 # calcolo di MAD_eff e Z_robusto, applicazione tripla condizione di scatto.
 
+FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
+
 QUERY_M_VOL = f"""
 
 -- =============================================================
@@ -185,6 +179,9 @@ baseline_grezza AS (
 
         -- Esclude flussi IPv6 puri (IPV4_SRC_ADDR = 0)
         AND IPV4_SRC_ADDR != 0
+
+        -- Filtro LAN sul SOGGETTO: valuto solo host interni alla rete monitorata
+        AND {FILTRO_LAN_SRC}
 
         -- Filtro: tengo bucket solo della stessa categoria temporale dell'ora corrente.
         -- IMPORTANTE: la sequenza dei casi DEVE essere identica a
@@ -269,6 +266,8 @@ volume_corrente AS (
     WHERE
         FIRST_SEEN >= now() - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
         AND IPV4_SRC_ADDR != 0
+        -- Filtro LAN sul SOGGETTO: valuto solo host interni alla rete monitorata
+        AND {FILTRO_LAN_SRC}
 
         -- Non considero il traffico interno della rete
         AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
@@ -333,20 +332,6 @@ ORDER BY z_robusto DESC
 # =============================================================================
 # FUNZIONI
 # =============================================================================
-
-def connetti_clickhouse():
-    """
-    Apre e restituisce la connessione al database ClickHouse.
-    """
-    client = clickhouse_connect.get_client(
-        host     = CLICKHOUSE_HOST,
-        port     = CLICKHOUSE_PORT,
-        database = CLICKHOUSE_DATABASE,
-        username = CLICKHOUSE_USER,
-        password = CLICKHOUSE_PASSWORD,
-    )
-    return client
-
 
 def calcola_m_vol(client):
     """

@@ -114,21 +114,13 @@ Soglie di rischio dello score finale S(h):
 =============================================================================
 """
 
-import clickhouse_connect
 from datetime import datetime, timezone
+from config import connetti_clickhouse, costruisci_filtro_lan
 
 
 # =============================================================================
 # CONFIGURAZIONE
 # =============================================================================
-
-# Parametri di connessione a ClickHouse (identici alle altre metriche)
-CLICKHOUSE_HOST     = "localhost"
-CLICKHOUSE_PORT     = 8123          # porta HTTP di ClickHouse
-CLICKHOUSE_DATABASE = "ntopng"
-CLICKHOUSE_USER     = "default"
-CLICKHOUSE_PASSWORD = "0022"
-
 # Peso della metrica nel modello di scoring
 PESO_M_FAIL = 30
 
@@ -238,6 +230,8 @@ FLOW_RISK_FAIL_BITMASK = (
 # TUTTI i flussi (sia falliti che riusciti, per calcolare il rate), quindi
 # si va direttamente sulla tabella `flows`.
 
+FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
+
 QUERY_M_FAIL = f"""
 -- =============================================================
 -- CTE 0: categoria_corrente
@@ -310,11 +304,7 @@ flussi_storici AS (
         ) = categoria_corrente
 
         -- Solo host della LAN interna come sorgente (RFC 1918)
-        AND (
-            isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '10.0.0.0/8')
-            OR isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '172.16.0.0/12')
-            OR isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '192.168.0.0/16')
-        )
+        AND {FILTRO_LAN_SRC}
 
         -- Escludiamo destinazioni intra-LAN: ci interessano i fallimenti
         -- verso server esterni, non il traffico interno (che ha pattern
@@ -402,13 +392,13 @@ flussi_correnti AS (
         FIRST_SEEN >= now() - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
 
         AND IPV4_SRC_ADDR != 0
+        
+        -- Filtro LAN sul SOGGETTO: valuto solo host interni alla rete monitorata
+        AND {FILTRO_LAN_SRC}
 
-        AND (
-            isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '10.0.0.0/8')
-            OR isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '172.16.0.0/12')
-            OR isIPAddressInRange(IPv4NumToString(IPV4_SRC_ADDR), '192.168.0.0/16')
-        )
-
+        -- Escludiamo destinazioni intra-LAN: ci interessano i fallimenti
+        -- verso server esterni, non il traffico interno (che ha pattern
+        -- propri e tipicamente bassissimo rate di fallimento)
         AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
         AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '172.16.0.0/12')
         AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '192.168.0.0/16')
@@ -469,20 +459,6 @@ ORDER BY z_robusto DESC
 # =============================================================================
 # FUNZIONI
 # =============================================================================
-
-def connetti_clickhouse():
-    """
-    Apre e restituisce la connessione al database ClickHouse.
-    """
-    client = clickhouse_connect.get_client(
-        host     = CLICKHOUSE_HOST,
-        port     = CLICKHOUSE_PORT,
-        database = CLICKHOUSE_DATABASE,
-        username = CLICKHOUSE_USER,
-        password = CLICKHOUSE_PASSWORD,
-    )
-    return client
-
 
 def calcola_m_fail(client):
     """

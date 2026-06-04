@@ -40,22 +40,14 @@ Soglie di rischio dello score finale S(h):
 """
 
 import argparse
-import clickhouse_connect
 from datetime import datetime, timezone
 
-from network_config import costruisci_filtro_lan
+from config import costruisci_filtro_lan, connetti_clickhouse
 
 
 # =============================================================================
 # CONFIGURAZIONE
 # =============================================================================
-
-# Parametri di connessione a ClickHouse
-CLICKHOUSE_HOST     = "localhost"
-CLICKHOUSE_PORT     = 8123
-CLICKHOUSE_DATABASE = "ntopng"
-CLICKHOUSE_USER     = "default"
-CLICKHOUSE_PASSWORD = "0022"
 
 # Peso della metrica nel modello di scoring
 # Statico: lo stesso per qualsiasi mismatch protocollo/porta rilevato da nDPI.
@@ -97,20 +89,6 @@ FINESTRA_MINUTI_DEFAULT = 60
 # =============================================================================
 # FUNZIONI
 # =============================================================================
-
-def connetti_clickhouse():
-    """
-    Apre e restituisce la connessione al database ClickHouse.
-    """
-    client = clickhouse_connect.get_client(
-        host     = CLICKHOUSE_HOST,
-        port     = CLICKHOUSE_PORT,
-        database = CLICKHOUSE_DATABASE,
-        username = CLICKHOUSE_USER,
-        password = CLICKHOUSE_PASSWORD,
-    )
-    return client
-
 
 def calcola_m_proto(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     """

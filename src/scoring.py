@@ -42,8 +42,7 @@ Esecuzione:
 import sys
 import traceback
 from datetime import datetime, timezone
-
-import clickhouse_connect
+from config import connetti_clickhouse
 
 # Import delle funzioni di calcolo di ogni metrica
 # Ogni modulo espone calcola_m_XXX(client) -> dict[host_ip -> dettagli]
@@ -60,13 +59,6 @@ from m_fail  import calcola_m_fail
 # =============================================================================
 # CONFIGURAZIONE
 # =============================================================================
-
-# Parametri di connessione a ClickHouse
-CLICKHOUSE_HOST     = "localhost"
-CLICKHOUSE_PORT     = 8123
-CLICKHOUSE_DATABASE = "ntopng"
-CLICKHOUSE_USER     = "default"
-CLICKHOUSE_PASSWORD = "0022"
 
 # Massimo score per host ranggiugibile
 SCORE_MAX = 100
@@ -94,19 +86,6 @@ METRICHE = [
 # =============================================================================
 # FUNZIONI DI SUPPORTO
 # =============================================================================
-
-def connetti_clickhouse():
-    """
-    Apre la connessione condivisa al database di ClickHouse.
-    """
-    return clickhouse_connect.get_client(
-        host     = CLICKHOUSE_HOST,
-        port     = CLICKHOUSE_PORT,
-        database = CLICKHOUSE_DATABASE,
-        username = CLICKHOUSE_USER,
-        password = CLICKHOUSE_PASSWORD,
-    )
-
 
 def fascia_rischio(score: int) -> str:
     """
@@ -209,6 +188,7 @@ def aggrega_per_host(risultati_per_metrica: dict) -> dict:
                 }
 
             # Aggiungo le info di questa metrica al record
+            # Se per qualche motivo la metrica non ha una chiave "penalita", ritorna 0 invece di fallire.
             penalita = dettagli.get("penalita", 0)
             aggregato[host_ip]["penalita_totale"] += penalita
             aggregato[host_ip]["metriche_attive"].append(nome_metrica)
@@ -308,31 +288,38 @@ def stampa_indice_rete(indice: dict):
 
 def stampa_tabella_host(aggregato: dict):
     """
-    Tabella riassuntiva degli host che hanno almeno una metrica attiva,
-    ordinati per score decrescente (i più gravi in alto).
+    Tabella riassuntiva degli host AZIONABILI (zona Giallo/Rosso), ordinati
+    per score decrescente. Gli host in zona Verde vengono volutamente esclusi:
+    sono tipicamente flaggati solo da metriche a basso peso (es. M_vol, +20)
+    che da sole non superano la soglia di allerta, quindi affollerebbero la
+    tabella senza essere azionabili. Il loro conteggio resta comunque
+    visibile nel riepilogo "STATO DELLA RETE".
     """
-    if not aggregato:
+    # Teniamo solo gli host in zona Giallo o Rosso
+    azionabili = {ip: rec for ip, rec in aggregato.items()
+                  if rec["fascia"] in ("GIALLO", "ROSSO")}
+
+    if not azionabili:
         print()
         print("=" * 75)
-        print("  Nessun host flaggato da nessuna metrica nell'ultima ora.")
+        print("  Nessun host in zona Giallo o Rosso nell'ultima ora.")
         print("=" * 75)
         return
 
-    # Ordino per score decrescente
-    ordinati = sorted(aggregato.items(),
+    # Ordino per score decrescente (i piu' gravi in alto)
+    ordinati = sorted(azionabili.items(),
                       key=lambda kv: kv[1]["score"],
                       reverse=True)
 
     print()
     print("=" * 75)
-    print("  TABELLA HOST FLAGGATI (ordinati per score decrescente)")
+    print("  TABELLA HOST AZIONABILI (zona Giallo/Rosso, ordinati per score)")
     print("=" * 75)
     print(f"  {'Host':<18} {'Score':>5}  {'Fascia':<7}  Metriche attive")
     print(f"  {'-'*18} {'-'*5}  {'-'*7}  {'-'*32}")
     for host_ip, rec in ordinati:
-        marker      = emoji_fascia(rec["fascia"])
-        metriche    = ", ".join(rec["metriche_attive"])
-        # Se la lista delle metriche è troppo lunga, la taglio con "..."
+        marker   = emoji_fascia(rec["fascia"])
+        metriche = ", ".join(rec["metriche_attive"])
         if len(metriche) > 40:
             metriche = metriche[:37] + "..."
         print(f"  {host_ip:<18} {rec['score']:>5}  "
@@ -379,17 +366,21 @@ def stampa_dettaglio_host_critici(aggregato: dict):
             print(f"    > {nome_metrica:8s} (+{penalita} punti)")
             # Stampo le chiavi salienti specifiche della metrica, escludendo
             # quelle generiche di sistema che non aiutano la lettura
+            # penalita e timestamp e nome metrica sono già evidenziati, quindi li salto.
             chiavi_da_saltare = {"penalita", "timestamp", nome_metrica}
             for k, v in dettagli.items():
                 if k in chiavi_da_saltare:
                     continue
-                # Per dict annidati (es. breakdown di M_fail) li espando
+                # Per dict annidati (es. breakdown di M_fail) li espando.
+                # Controllo se è un sottodizionario
                 if isinstance(v, dict):
                     print(f"         {k}:")
                     for k2, v2 in v.items():
                         print(f"           {k2:<18}: {v2}")
+                # Controllo se è un float per formattarlo con 4 decimali
                 elif isinstance(v, float):
                     print(f"         {k:<22}: {v:.4f}")
+                # Se sono intero o stringa lo stampo normalmente
                 else:
                     print(f"         {k:<22}: {v}")
 
