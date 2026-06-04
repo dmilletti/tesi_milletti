@@ -58,6 +58,7 @@ RETI_LOCALI = [
     "192.168.0.0/16",   # classe C privata
     "10.0.0.0/8",       # classe A privata
     "172.16.0.0/12",    # classe B privata
+    "147.32.0.0/16",    # solo per test di un pcap specifico, da rimuovere dopo
 ]
 
 # =============================================================================

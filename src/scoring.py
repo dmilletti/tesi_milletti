@@ -288,18 +288,18 @@ def stampa_indice_rete(indice: dict):
 
 def stampa_tabella_host(aggregato: dict):
     """
-    Tabella riassuntiva degli host AZIONABILI (zona Giallo/Rosso), ordinati
+    Tabella riassuntiva degli host SOSPETTI (zona Giallo/Rosso), ordinati
     per score decrescente. Gli host in zona Verde vengono volutamente esclusi:
     sono tipicamente flaggati solo da metriche a basso peso (es. M_vol, +20)
     che da sole non superano la soglia di allerta, quindi affollerebbero la
-    tabella senza essere azionabili. Il loro conteggio resta comunque
+    tabella senza essere veramente sospetti. Il loro conteggio resta comunque
     visibile nel riepilogo "STATO DELLA RETE".
     """
     # Teniamo solo gli host in zona Giallo o Rosso
-    azionabili = {ip: rec for ip, rec in aggregato.items()
+    sospetti = {ip: rec for ip, rec in aggregato.items()
                   if rec["fascia"] in ("GIALLO", "ROSSO")}
 
-    if not azionabili:
+    if not sospetti:
         print()
         print("=" * 75)
         print("  Nessun host in zona Giallo o Rosso nell'ultima ora.")
@@ -307,13 +307,13 @@ def stampa_tabella_host(aggregato: dict):
         return
 
     # Ordino per score decrescente (i piu' gravi in alto)
-    ordinati = sorted(azionabili.items(),
+    ordinati = sorted(sospetti.items(),
                       key=lambda kv: kv[1]["score"],
                       reverse=True)
 
     print()
     print("=" * 75)
-    print("  TABELLA HOST AZIONABILI (zona Giallo/Rosso, ordinati per score)")
+    print("  TABELLA HOST SOSPETTI (zona Giallo/Rosso, ordinati per score)")
     print("=" * 75)
     print(f"  {'Host':<18} {'Score':>5}  {'Fascia':<7}  Metriche attive")
     print(f"  {'-'*18} {'-'*5}  {'-'*7}  {'-'*32}")
