@@ -1,6 +1,8 @@
 # Analisi degli host e valutazione del rischio di rete
 
-L'obiettivo è definire formalmente un modello matematico in grado di valutare lo stato di sicurezza di un'infrastruttura IT e rispondere alla domanda principale: "la mia rete è sicura?". Attraverso un approccio non invasivo (l'analisi passiva del traffico), il modello valuta il profilo dei singoli host utilizzando metriche deterministiche e statistiche. Lo scopo è andare oltre la semplice ricerca di minacce già conosciute (il classico approccio "bianco o nero"), per identificare variazioni anomale di comportamento ed eventi mai visti prima nella cosiddetta "zona grigia". In questo modo, possiamo misurare quanto ogni nodo della rete si discosta dal comportamento normale e calcolare il rischio per l'intera rete. Il modello aiuta a capire se la nostra rete è sicura e se ci sono particolari host che richiedono attenzione.
+L'obiettivo è definire formalmente un modello matematico in grado di valutare lo stato di sicurezza di un'infrastruttura IT e rispondere alla domanda principale: "la mia rete è sicura?". Attraverso un approccio non invasivo (l'analisi passiva del traffico), il modello valuta il profilo dei singoli host utilizzando metriche deterministiche e statistiche.  
+Lo scopo è andare oltre la semplice ricerca di minacce già conosciute (il classico approccio "bianco o nero"), per identificare variazioni anomale di comportamento ed eventi mai visti prima nella cosiddetta "zona grigia". In questo modo, possiamo misurare quanto ogni nodo della rete si discosta dal comportamento normale e calcolare il rischio per l'intera rete. Il modello aiuta a capire se la nostra rete è sicura e se ci sono particolari host che richiedono attenzione.  
+Il sistema assume come **principio operativo** che una rete sia sicura quando nessuno dei suoi host interni risulta compromesso o presenta comportamenti maliziosi rilevabili dall'analisi del traffico.
 
 ---
 
@@ -85,12 +87,12 @@ Poiché in ambito di sicurezza informatica la robustezza di una rete è pari a q
 Per valutare la sicurezza globale della rete, il modello considera due fattori importanti:
 
 1. **Il rischio di picco:**  
-   La rete viene considerata insicura se anche un solo host supera una soglia critica che chiameremo $\tau$. Il primo fattore da considerare è quindi il punteggio massimo registrato tra tutti gli host della rete, che possiamo esprimere come $H$:
+   La rete viene considerata insicura se anche un solo host supera una soglia critica che chiameremo $\tau$ (fascia rossa). Il primo fattore da considerare è quindi il punteggio massimo registrato tra tutti gli host della rete, che possiamo esprimere come $H$:
    
    $$\max_{h \in H} S(h)$$
 
 3. **La densità delle anomalie:**  
-   Se viene superata la soglia critica $\tau$, è fondamentale capire se si tratta di un'anomalia isolata o di una minaccia estesa. Si definisce l'insieme degli host critici $C = \{h \in H \mid S(h) \ge \tau\}$. 
+   Se viene superata la soglia critica $\tau$ (fascia rossa), è fondamentale capire se si tratta di un'anomalia isolata o di una minaccia estesa. Si definisce l'insieme degli host critici $C = \{h \in H \mid S(h) \ge \tau\}$. 
    La dimensione di questo insieme ($|C|$) definisce lo stato della rete:
    * **$|C| = 0$ :** rete sicura.
    * **$|C| \approx 1$ :** anomalia localizzata.
