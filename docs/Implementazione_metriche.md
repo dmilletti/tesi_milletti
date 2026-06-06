@@ -99,5 +99,41 @@ Il nostro modello matematico, al contrario, si basa su un indice di rischio dive
 Il nostro script interroga ClickHouse e non estrae il valore numerico del punteggio nativo, ma utilizza l'allarme generato da ntopng esclusivamente come interruttore logico. Se l'allarme esiste, la metrica corrispondente viene attivata ($M_i = 1$).
 Una volta confermata la presenza dell'anomalia, il motore di calcolo assegna esattamente il peso di penalità definito nella nostra tabella teorica.
 
-### 2.4 Valutazione della sicurezza degli host e della rete  
-L'ultima fase del processo riguarda il calcolo dello *Score globale*. Ogni host viene infatti classificato in base al suo livello di rischio, permettendo di individuare immediatamente quali computer hanno comportamenti anomali e di identificare lo stato dell'intera rete.
+### 2.4 Valutazione della sicurezza degli host e della rete
+
+L'ultima fase del processo riguarda il calcolo dello *Score globale*. Mentre le metriche descritte finora si limitano ad osservare un singolo comportamento e rispondono con un valore booleano, il motore di *Scoring* si occupa di trasformare tutti questi segnali isolati in una valutazione complessiva.
+
+Il sistema è basato su un approccio ibrido: le **metriche deterministiche** generano i loro allarmi in tempo reale all'interno di ntopng, ma la loro aggregazione non viene fatta immediatamente, infatti il motore di scoring lavora a **batch orario**.
+
+Questa scelta è coerente con le **metriche custom**, che per calcolare lo *Z-score robusto* richiedono il confronto tra l'ultima ora di traffico e la baseline storica dei 7 giorni precedenti (ore minime di baseline = 30 per categoria temporale, per ulteriori dettagli vedere M_vol_decisioni_progettuali.md oppure M_fail_decisioni_progettuali.md).
+
+A ogni esecuzione, il motore di scoring considera gli allarmi accumulati e il traffico osservato nell'ultima ora, producendo uno score per ogni host della rete e una valutazione globale.
+
+Lo scoring non assegna un punteggio a qualunque indirizzo IP osservato, ma esclusivamente agli **host interni della rete**, ovvero quelli appartenenti ai range privati RFC 1918 (o eventuali blocchi aggiuntivi definiti nel file di configurazione). Questo è stato scelto perché un IP esterno non possiede una baseline storica all'interno del sistema e, soprattutto, non rappresenta un nodo su cui si può intervenire.
+All'interno di questo insieme, il sistema espande la valutazione solo agli host che appartengono alle fasce gialla/rossa (i più sospetti).
+
+#### 2.4.1 Come funziona il motore di scoring
+
+L'esecuzione di un ciclo di scoring si articola in quattro passaggi sequenziali:
+
+1. Viene aperta una sola connessione a ClickHouse, riutilizzata da tutte le metriche. Questo evita overhead di aperture ripetute e garantisce che ogni metrica interroghi una visione coerente dei dati.
+2. Le metriche vengono eseguite una dopo l'altra e se per qualunque motivo una metrica fallisce l'esecuzione, il sistema procede con la valutazione evitando il fallimento.
+3. Per ogni singolo host i risultati delle varie metriche vengono sommati per ottenere infine lo **score finale**.
+4. Infine ogni punteggio calcolato viene mappato nelle tre fasce di rischio, secondo le soglie definite dal modello:
+   * Verde -> [0-29 punti]: host sicuro, nessun intervento richiesto.
+   * Giallo -> [30-59 punti]: host con comportamento sospetto, da monitorare.
+   * Rosso -> [60-100 punti]: host probabilmente compromesso, intervento immediato.
+
+#### 2.4.2 Valutazione della rete
+
+Una volta calcolati i punteggi individuali, il motore di scoring deriva un indice complessivo dello stato della rete, utilizzando il principio per cui la robustezza di un'infrastruttura è pari a quella del suo anello più debole.
+
+Il risultato finale non è un singolo numero, ma un report pensato per l'analista. Lo scoring produce:
+
+* un riepilogo dello stato della rete, con la distribuzione degli host per fascia e lo score massimo;
+* una tabella di tutti gli host segnalati, ordinata per punteggio decrescente;
+* un dettaglio espanso dei soli host critici (fasce gialla e rossa) in cui per ogni nodo vengono elencate le metriche che hanno contribuito al punteggio e i relativi dettagli.
+
+Infine, il motore di scoring comunica lo stato globale della rete anche tramite il proprio codice di uscita (0 per verde, 1 per giallo e 2 per rosso), così che lo scheduler che lo lancia possa innescare automaticamente alert esterni senza dover interpretare il testo.
+
+In questo modo la valutazione si chiude trasformando l'analisi passiva del traffico in un'informazione importante, azionabile dall'amministratore di rete.
