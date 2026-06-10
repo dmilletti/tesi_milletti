@@ -44,23 +44,11 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import costruisci_filtro_lan, connetti_clickhouse
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Peso della metrica nel modello di scoring
-PESO_M_SNI = 50
-
-# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
-# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
-# passando un valore esplicito alla funzione `calcola_m_sni()`.
-# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
-# questo default; il parametro serve a contenere il costo della query
-# quando si testa su tabelle molto grandi (miliardi di record).
-FINESTRA_MINUTI_DEFAULT = 60
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan,
+    PESO_M_SNI, FINESTRA_MINUTI_DEFAULT,
+    M_SNI_BIT_NDPI_MISSING_SNI as BIT_NDPI_MISSING_SNI,
+)
 
 
 # =============================================================================
@@ -128,7 +116,7 @@ def calcola_m_sni(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
         cli_ip AS host_ip,
 
         -- Conteggio dei flussi senza SNI generati dall'host
-        countIf(bitTest(flow_risk_bitmap, 24) = 1) AS hits_missing_sni,
+        countIf(bitTest(flow_risk_bitmap, {BIT_NDPI_MISSING_SNI}) = 1) AS hits_missing_sni,
 
         -- Se condizione è vera (hits_missing_sni > 0), restituisce 1; altrimenti 0
         if(hits_missing_sni > 0, 1, 0) AS M_sni
@@ -144,7 +132,7 @@ def calcola_m_sni(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
         -- Pre-filtro: ci interessano solo i flussi con bit 24 attivo.
         -- Sfruttiamo l'efficienza colonnare di ClickHouse per scartare
         -- subito tutti gli altri flussi.
-        AND bitTest(flow_risk_bitmap, 24) = 1
+        AND bitTest(flow_risk_bitmap, {BIT_NDPI_MISSING_SNI}) = 1
 
     GROUP BY host_ip
 

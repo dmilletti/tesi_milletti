@@ -50,31 +50,16 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import costruisci_filtro_lan, connetti_clickhouse
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Soglie di intensità
-SOGLIA_SRV_PERSISTENTE = 3
-SOGLIA_CLI_MIRATO      = 11
-
-# Pesi differenziati per direzione e intensità
-PESO_SRV_ISOLATO     = 30   # 1-2 hit verso server BL
-PESO_SRV_PERSISTENTE = 50   # 3+ hit verso server BL
-PESO_CLI_RARO   = 5    # 1-10 hit da client BL
-PESO_CLI_MIRATO      = 15   # 11+ hit da client BL
-
-# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
-# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
-# passando un valore esplicito alla funzione `calcola_m_rep()`.
-# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
-# questo default; il parametro serve a contenere il costo della query
-# quando si testa su tabelle molto grandi (miliardi di record).
-FINESTRA_MINUTI_DEFAULT = 60
-
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan,
+    M_REP_SOGLIA_SRV_PERSISTENTE as SOGLIA_SRV_PERSISTENTE,
+    M_REP_SOGLIA_CLI_MIRATO as SOGLIA_CLI_MIRATO,
+    M_REP_PESO_SRV_ISOLATO as PESO_SRV_ISOLATO,
+    M_REP_PESO_SRV_PERSISTENTE as PESO_SRV_PERSISTENTE,
+    M_REP_PESO_CLI_RARO as PESO_CLI_RARO,
+    M_REP_PESO_CLI_MIRATO as PESO_CLI_MIRATO,
+    FINESTRA_MINUTI_DEFAULT,
+)
 
 # =============================================================================
 # QUERY SQL

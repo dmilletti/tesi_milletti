@@ -55,17 +55,7 @@ from m_scan  import calcola_m_scan
 from m_vol   import calcola_m_vol
 from m_fail  import calcola_m_fail
 
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Massimo score per host ranggiugibile
-SCORE_MAX = 100
-
-# Soglie delle fasce di rischio
-SOGLIA_GIALLO = 30   # >= 30 punti -> giallo
-SOGLIA_ROSSO  = 60   # >= 60 punti -> rosso
+from config import SCORE_MAX, SOGLIA_GIALLO, SOGLIA_ROSSO
 
 # Registro delle metriche da eseguire.
 # Lista di tuple (nome_chiave_dict, nome_metrica, funzione_calcolo).

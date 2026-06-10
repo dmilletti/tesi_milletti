@@ -45,23 +45,10 @@ Soglie di rischio dello score finale S(h):
 
 import argparse
 from datetime import datetime, timezone
-from config import costruisci_filtro_lan, connetti_clickhouse
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-# Peso della metrica nel modello di scoring
-PESO_M_CERT = 40
-
-# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
-# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
-# passando un valore esplicito alla funzione `calcola_m_cert()`.
-# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
-# questo default; il parametro serve a contenere il costo della query
-# quando si testa su tabelle molto grandi (miliardi di record).
-FINESTRA_MINUTI_DEFAULT = 60
-
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan,
+    PESO_M_CERT, FINESTRA_MINUTI_DEFAULT,
+)
 
 # =============================================================================
 # QUERY SQL

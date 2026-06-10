@@ -41,29 +41,11 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import costruisci_filtro_lan, connetti_clickhouse
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Alert ID del check "Server Port Detected" in ntopng
-# (verificato in /usr/share/ntopng/scripts/lua/modules/alert_keys/host_alert_keys.lua)
-ALERT_ID_SERVER_PORT = 29
-
-# Peso della metrica nel modello di scoring
-# Statico: lo stesso per qualsiasi nuova porta server rilevata
-PESO_M_SRV = 30
-
-# Finestra temporale di analisi (default): guardiamo gli allarmi degli ultimi 60 minuti.
-# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
-# passando un valore esplicito alla funzione `calcola_m_srv()`.
-# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
-# questo default; il parametro serve a contenere il costo della query
-# quando si testa su tabelle molto grandi (miliardi di record).
-FINESTRA_MINUTI_DEFAULT = 60
-
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan,
+    M_SRV_ALERT_ID as ALERT_ID_SERVER_PORT,
+    PESO_M_SRV, FINESTRA_MINUTI_DEFAULT,
+)
 
 # =============================================================================
 # QUERY SQL

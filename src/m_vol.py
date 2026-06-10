@@ -51,60 +51,17 @@ Soglie di rischio dello score finale S(h):
 """
 
 from datetime import datetime, timezone
-from config import connetti_clickhouse, costruisci_filtro_lan
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan, costruisci_filtro_esterno,
+    PESO_M_VOL,
+    M_VOL_SOGLIA_Z as SOGLIA_Z,
+    M_VOL_MAD_MIN_FRAZIONE as MAD_MIN_FRAZIONE,
+    M_VOL_MAD_MIN_ASSOLUTO as MAD_MIN_ASSOLUTO,
+    M_VOL_V_MIN_OPERATIVO as V_MIN_OPERATIVO,
+    MIN_BASELINE_HOURS, FINESTRA_STORICO_GIORNI, FINESTRA_CORRENTE_ORE,
+    ORE_LAVORATIVE, GIORNI_WEEKEND,
+)
 
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Peso della metrica nel modello di scoring
-PESO_M_VOL = 20
-
-# ---- Parametri statistici ---------------------------------------------------
-
-# Soglia di anomalia statistica (regola empirica 68-95-99.7)
-# Z > 3 significa che l'evento ha < 0.3% di probabilità di essere ordinario
-SOGLIA_Z = 3.0
-
-# Previene la divisione per zero su host a baseline costante.
-# 0.10 = una variazione sotto il 10% della mediana non è mai anomalia.
-MAD_MIN_FRAZIONE = 0.10
-
-# Floor assoluto sulla MAD (in byte)
-# Terzo termine del greatest() che garantisce la stabilità numerica anche
-# su host con baseline molto bassa o nulla. Identificato come raffinamento
-# in fase di validazione (test stagionale).
-# 1 MB è un compromesso: abbastanza grande da neutralizzare host quasi inattivi,
-# abbastanza piccolo da non oscurare anomalie reali su host di volume medio-alto.
-MAD_MIN_ASSOLUTO = 1024 * 1024  # 1 MB in byte
-
-# Soglia di significatività operativa (in byte)
-# Sotto questo volume, anche uno Z altissimo non costituisce esfiltrazione
-V_MIN_OPERATIVO = 50 * 1024 * 1024  # 52_428_800 byte
-
-# Minimo numero di bucket necessari per una baseline statisticamente valida
-# Se l'host ha meno di 30 ore di osservazione nella categoria temporale
-# corrente, viene escluso dal calcolo (cold start).
-MIN_BASELINE_HOURS = 30 # da abbassare per test
-
-# ---- Finestre temporali -----------------------------------------------------
-
-# Profondità della baseline
-# 7 giorni per assorbire la stagionalità settimanale
-FINESTRA_STORICO_GIORNI = 7
-
-# Finestra dell'ora corrente da valutare
-FINESTRA_CORRENTE_ORE = 1
-
-# ---- Categorie temporali ---------------------------
-
-# Range orario considerato lavorativo per i feriali
-# Format: (ora_inizio, ora_fine) inclusivi
-ORE_LAVORATIVE = (9, 17)
-
-# Giorni della settimana considerati weekend
-# toDayOfWeek() di ClickHouse (6=Sab, 7=Dom)
-GIORNI_WEEKEND = (6, 7)
 
 
 # =============================================================================
@@ -130,6 +87,8 @@ GIORNI_WEEKEND = (6, 7)
 # calcolo di MAD_eff e Z_robusto, applicazione tripla condizione di scatto.
 
 FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
+
+FILTRO_EXT_DST = costruisci_filtro_esterno("IPv4NumToString(IPV4_DST_ADDR)")
 
 QUERY_M_VOL = f"""
 
@@ -195,14 +154,8 @@ baseline_grezza AS (
                 'feriale_fuoriorario'
         ) = categoria_corrente
 
-        -- Filtro direzionalità: destinazione esterna alla LAN.
-        -- Escludo i tre range RFC1918 + loopback + link-local.
         -- Quindi non considero tutto il traffico interno della rete. 
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '172.16.0.0/12')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '192.168.0.0/16')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '127.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '169.254.0.0/16')
+        AND {FILTRO_EXT_DST}
 
     GROUP BY host_ip, bucket_orario
 ),
@@ -270,11 +223,7 @@ volume_corrente AS (
         AND {FILTRO_LAN_SRC}
 
         -- Non considero il traffico interno della rete
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '172.16.0.0/12')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '192.168.0.0/16')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '127.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '169.254.0.0/16')
+        AND {FILTRO_EXT_DST}
 
     GROUP BY host_ip
 )

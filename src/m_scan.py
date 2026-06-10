@@ -68,30 +68,14 @@ Soglie di rischio dello score finale S(h):
 
 import argparse
 from datetime import datetime, timezone
-
-from config import costruisci_filtro_lan, connetti_clickhouse
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-
-# Alert ID del check "Scan (Realtime)" in ntopng
-# (verificato in /usr/share/ntopng/scripts/lua/modules/alert_keys/host_alert_keys.lua)
-ALERT_ID_SCAN_REALTIME = 15
-
-# Pesi differenziati per categoria di scan rilevato
-PESO_EVASIONE_FIREWALL = 50   # FIN/RST scan (codici [3] o [4])
-PESO_SYN_SCAN          = 40   # SYN scan classico (codice [2])
-PESO_INCOMPLETE_FLOWS  = 30   # Flows incomplete (solo codice [0])
-
-# Finestra temporale di analisi (default): guardiamo i flussi degli ultimi 60 minuti.
-# Può essere sovrascritta dall'argomento `--finestra-minuti` da CLI oppure
-# passando un valore esplicito alla funzione `calcola_m_scan()`.
-# Nel sistema finale, lo scoring.py chiama la funzione senza argomenti e usa
-# questo default; il parametro serve a contenere il costo della query
-# quando si testa su tabelle molto grandi (miliardi di record).
-FINESTRA_MINUTI_DEFAULT = 60
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan,
+    M_SCAN_ALERT_ID as ALERT_ID_SCAN_REALTIME,
+    M_SCAN_PESO_EVASIONE_FIREWALL as PESO_EVASIONE_FIREWALL,
+    M_SCAN_PESO_SYN_SCAN as PESO_SYN_SCAN,
+    M_SCAN_PESO_INCOMPLETE_FLOWS as PESO_INCOMPLETE_FLOWS,
+    FINESTRA_MINUTI_DEFAULT,
+)
 
 
 # =============================================================================

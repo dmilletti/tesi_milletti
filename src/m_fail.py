@@ -115,73 +115,21 @@ Soglie di rischio dello score finale S(h):
 """
 
 from datetime import datetime, timezone
-from config import connetti_clickhouse, costruisci_filtro_lan
-
-
-# =============================================================================
-# CONFIGURAZIONE
-# =============================================================================
-# Peso della metrica nel modello di scoring
-PESO_M_FAIL = 30
-
-# ---- Parametri statistici ---------------------------------------------------
-
-# Soglia di anomalia statistica (regola empirica 68-95-99.7)
-# Z > 3 significa che l'evento ha < 0.3% di probabilità di essere ordinario
-SOGLIA_Z = 3
-
-# Rate operativo minimo: 
-# anche con Z alto, il rate corrente in valore assoluto
-# deve essere almeno del 30% per essere considerato un host in palese
-# sofferenza. Senza questa soglia, un host passato dallo 0.1% al 2% di
-# fallimenti darebbe Z alto ma non sarebbe operativamente significativo.
-R_MIN_OPERATIVO = 0.30
-
-# Limite assoluto sulla MAD (5 punti percentuali). Evita la divisione per zero
-# su host molto regolari ed elimina falsi positivi su scostamenti minuscoli
-# in valore assoluto.
-MAD_MIN_ASSOLUTA = 0.05
-
-# Sample size minimo nell'ora corrente:
-# sotto questa soglia di flussi totali il rate non è statisticamente significativo
-# (es. 1 fallito su 3 = 33% e'rumore puro).
-MIN_FLUSSI_CORRENTE = 50
-
-# Minimo numero di bucket necessari per una baseline statisticamente valida
-# Se l'host ha meno di 30 ore di osservazione nella categoria temporale
-# corrente, viene escluso dal calcolo (cold start).
-MIN_BASELINE_HOURS = 30
-
-# ---- Finestre temporali -----------------------------------------------------
-
-# Profondità della baseline
-# 7 giorni per assorbire la stagionalità settimanale
-FINESTRA_CORRENTE_ORE   = 1
-# Finestra dell'ora corrente da valutare
-FINESTRA_STORICO_GIORNI = 7
-
-# ---- Categorie temporali ---------------------------
-
-# Giorni della settimana considerati weekend
-# toDayOfWeek() di ClickHouse (6=Sab, 7=Dom)
-GIORNI_WEEKEND = (6, 7)
-
-# Range orario considerato lavorativo per i feriali
-# Format: (ora_inizio, ora_fine) inclusivi
-ORE_LAVORATIVE = (9, 17)
-
-# ---- Bit nDPI per la definizione di "flusso fallito" --------------------------
-
-# Posizioni dei bit nell'enum ndpi_risk_enum 
-# (verificate su src/include/ndpi_typedefs.h del repository ntop/nDPI).
-# La numerazione dell'enum coincide con la posizione del bit nel
-# FLOW_RISK bitmap (cfr. m_cert.py, m_sni.py per riferimento incrociato).
-
-BIT_NDPI_ERROR_CODE      = 43   # NDPI_ERROR_CODE_DETECTED
-BIT_NDPI_UNIDIRECTIONAL  = 46   # NDPI_UNIDIRECTIONAL_TRAFFIC
-BIT_NDPI_TCP_ISSUES      = 50   # NDPI_TCP_ISSUES
-BIT_NDPI_UNRESOLVED_HOST = 51   # NDPI_UNRESOLVED_HOSTNAME
-BIT_NDPI_PROBING_ATTEMPT = 55   # NDPI_PROBING_ATTEMPT
+from config import (
+    connetti_clickhouse, costruisci_filtro_lan, costruisci_filtro_esterno,
+    PESO_M_FAIL,
+    M_FAIL_SOGLIA_Z as SOGLIA_Z,
+    M_FAIL_R_MIN_OPERATIVO as R_MIN_OPERATIVO,
+    M_FAIL_MAD_MIN_ASSOLUTA as MAD_MIN_ASSOLUTA,
+    M_FAIL_MIN_FLUSSI_CORRENTE as MIN_FLUSSI_CORRENTE,
+    M_FAIL_BIT_NDPI_ERROR_CODE as BIT_NDPI_ERROR_CODE,
+    M_FAIL_BIT_NDPI_UNIDIRECTIONAL as BIT_NDPI_UNIDIRECTIONAL,
+    M_FAIL_BIT_NDPI_TCP_ISSUES as BIT_NDPI_TCP_ISSUES,
+    M_FAIL_BIT_NDPI_UNRESOLVED_HOST as BIT_NDPI_UNRESOLVED_HOST,
+    M_FAIL_BIT_NDPI_PROBING_ATTEMPT as BIT_NDPI_PROBING_ATTEMPT,
+    MIN_BASELINE_HOURS, FINESTRA_CORRENTE_ORE, FINESTRA_STORICO_GIORNI,
+    ORE_LAVORATIVE, GIORNI_WEEKEND,
+)
 
 # Bitmask compatta usata nella query SQL:
 #  la useremo con bitAnd() per testare se ALMENO UNO dei bit di fallimento è settato.
@@ -231,6 +179,8 @@ FLOW_RISK_FAIL_BITMASK = (
 # si va direttamente sulla tabella `flows`.
 
 FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
+
+FILTRO_EXT_DST = costruisci_filtro_esterno("IPv4NumToString(IPV4_DST_ADDR)")
 
 QUERY_M_FAIL = f"""
 -- =============================================================
@@ -306,14 +256,8 @@ flussi_storici AS (
         -- Solo host della LAN interna come sorgente (RFC 1918)
         AND {FILTRO_LAN_SRC}
 
-        -- Escludiamo destinazioni intra-LAN: ci interessano i fallimenti
-        -- verso server esterni, non il traffico interno (che ha pattern
-        -- propri e tipicamente bassissimo rate di fallimento)
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '172.16.0.0/12')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '192.168.0.0/16')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '127.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '169.254.0.0/16')
+        -- Non considero il traffico interno della rete
+        AND {FILTRO_EXT_DST}
 
     GROUP BY host_ip, bucket_orario
 
@@ -396,14 +340,8 @@ flussi_correnti AS (
         -- Filtro LAN sul SOGGETTO: valuto solo host interni alla rete monitorata
         AND {FILTRO_LAN_SRC}
 
-        -- Escludiamo destinazioni intra-LAN: ci interessano i fallimenti
-        -- verso server esterni, non il traffico interno (che ha pattern
-        -- propri e tipicamente bassissimo rate di fallimento)
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '10.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '172.16.0.0/12')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '192.168.0.0/16')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '127.0.0.0/8')
-        AND NOT isIPAddressInRange(IPv4NumToString(IPV4_DST_ADDR), '169.254.0.0/16')
+        -- Non considero il traffico interno della rete.
+        AND {FILTRO_EXT_DST}
 
     GROUP BY host_ip
 
