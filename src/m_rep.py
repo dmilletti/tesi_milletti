@@ -50,7 +50,7 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import (
+from readconfig import (
     connetti_clickhouse, costruisci_filtro_lan,
     M_REP_SOGLIA_SRV_PERSISTENTE as SOGLIA_SRV_PERSISTENTE,
     M_REP_SOGLIA_CLI_MIRATO as SOGLIA_CLI_MIRATO,

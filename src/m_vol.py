@@ -51,7 +51,7 @@ Soglie di rischio dello score finale S(h):
 """
 
 from datetime import datetime, timezone
-from config import (
+from readconfig import (
     connetti_clickhouse, costruisci_filtro_lan, costruisci_filtro_esterno,
     PESO_M_VOL,
     M_VOL_SOGLIA_Z as SOGLIA_Z,

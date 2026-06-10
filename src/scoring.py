@@ -42,7 +42,7 @@ Esecuzione:
 import sys
 import traceback
 from datetime import datetime, timezone
-from config import connetti_clickhouse
+from readconfig import connetti_clickhouse, SCORE_MAX, SOGLIA_GIALLO, SOGLIA_ROSSO
 
 # Import delle funzioni di calcolo di ogni metrica
 # Ogni modulo espone calcola_m_XXX(client) -> dict[host_ip -> dettagli]
@@ -54,8 +54,6 @@ from m_proto import calcola_m_proto
 from m_scan  import calcola_m_scan
 from m_vol   import calcola_m_vol
 from m_fail  import calcola_m_fail
-
-from config import SCORE_MAX, SOGLIA_GIALLO, SOGLIA_ROSSO
 
 # Registro delle metriche da eseguire.
 # Lista di tuple (nome_chiave_dict, nome_metrica, funzione_calcolo).

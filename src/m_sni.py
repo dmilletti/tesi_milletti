@@ -44,7 +44,7 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import (
+from readconfig import (
     connetti_clickhouse, costruisci_filtro_lan,
     PESO_M_SNI, FINESTRA_MINUTI_DEFAULT,
     M_SNI_BIT_NDPI_MISSING_SNI as BIT_NDPI_MISSING_SNI,

@@ -41,7 +41,7 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 
-from config import (
+from readconfig import (
     connetti_clickhouse, costruisci_filtro_lan,
     M_SRV_ALERT_ID as ALERT_ID_SERVER_PORT,
     PESO_M_SRV, FINESTRA_MINUTI_DEFAULT,

@@ -68,7 +68,7 @@ Soglie di rischio dello score finale S(h):
 
 import argparse
 from datetime import datetime, timezone
-from config import (
+from readconfig import (
     connetti_clickhouse, costruisci_filtro_lan,
     M_SCAN_ALERT_ID as ALERT_ID_SCAN_REALTIME,
     M_SCAN_PESO_EVASIONE_FIREWALL as PESO_EVASIONE_FIREWALL,
