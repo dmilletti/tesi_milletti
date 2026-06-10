@@ -49,21 +49,34 @@ pip install clickhouse-connect
 deactivate
 ```
 
-## 4. Modifica dei parametri di configurazione di clickhouse
-All'interno dello script di configurazione `config.py`, sono presenti le costanti di configurazione per la connessione al database di ClickHouse:
+## 4. Modifica dei parametri di configurazione
 
-```bash
-# Parametri di connessione a ClickHouse
-CLICKHOUSE_HOST     = "localhost"
-CLICKHOUSE_PORT     = 8123
-CLICKHOUSE_DATABASE = "ntopng"
-CLICKHOUSE_USER     = "default"
-CLICKHOUSE_PASSWORD = "0022"
+All'interno del file di configurazione `config.ini` sono presenti le costanti necessarie alla connessione con il database ClickHouse:
+
+```ini
+[clickhouse]
+host     = localhost
+port     = 8123
+database = ntopng
+user     = default
+password = 0022
+
 ```
 
-È necessario modificare tali valori e adattarli alle specifiche del proprio ambiente per garantire la corretta instaurazione della sessione e prevenire errori di connessione durante l'esecuzione delle metriche. Di norma, l'unico parametro che richiede una variazione è la password di autenticazione.
+È necessario adattare questi valori alle specifiche del proprio ambiente per garantire la corretta instaurazione della sessione e prevenire errori di connessione durante l'esecuzione delle metriche. Di norma, l'unico parametro che richiede una variazione è la password di autenticazione.
 
-## 5 Abilitazione metriche di ntopng
+### 4.1 Configurazione per IP pubblici o file PCAP
+
+Qualora si desidera analizzare file PCAP o reti con indirizzi IP pubblici, è fondamentale aggiornare la configurazione di **ntopng** e del file `config.ini`:
+
+1. **Configurazione di ntopng**: Questa operazione è necessaria per evitare che alcuni host non generino correttamente gli allarmi. Per farlo bisogna accedere al file di configurazione tramite il percorso `/etc/ntopng/ntopng.conf` e specificare le subnet da considerare nell'analisi e modificare la seguente riga:
+```bash
+-m=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
+```
+
+2. **Configurazione di `config.ini`**: Aggiornare parallelamente le reti locali all'interno del file `config.ini` per garantire la correttezza dei risultati restituiti dalle query.
+
+## 5. Abilitazione metriche di ntopng
 All'interno del sistema di scoring viene utilizzato il segnale *"Server Port Detected"* fornito direttamente da ntopng. Di default questa metrica è disabilitata; pertanto, per far sì che il rilevamento di nuove porte server funzioni correttamente, è necessario abilitare l'opzione dalla dashboard (UI) di ntopng.
 
 Nello specifico, occorre navigare nel menu `Settings` $\rightarrow$ `Policies` $\rightarrow$ `Behavioural Checks`, inserire *"Server Port Detected"* nella barra di ricerca e attivare il relativo flag.
