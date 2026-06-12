@@ -77,11 +77,11 @@ Qualora si desidera analizzare file PCAP o reti con indirizzi IP pubblici, è fo
 2. **Configurazione di `config.ini`**: Aggiornare parallelamente le reti locali all'interno del file `config.ini` per garantire la correttezza dei risultati restituiti dalle query.
 
 ## 5. Abilitazione metriche di ntopng
-All'interno del sistema di scoring viene utilizzato il segnale *"Server Port Detected"* fornito direttamente da ntopng. Di default questa metrica è disabilitata; pertanto, per far sì che il rilevamento di nuove porte server funzioni correttamente, è necessario abilitare l'opzione dalla dashboard (UI) di ntopng.
+All'interno del sistema di scoring vengono utilizzati i segnali **"Server Port Detected"** e **"Scan (Realtime)"** forniti direttamente da ntopng. Di default queste metriche sono disabilitate; pertanto, per far sì che il rilevamento di nuove porte server e di scansioni funzioni correttamente, è necessario abilitare la relativa opzione dalla dashboard (UI) di ntopng.
 
-Nello specifico, occorre navigare nel menu `Settings` $\rightarrow$ `Policies` $\rightarrow$ `Behavioural Checks`, inserire *"Server Port Detected"* nella barra di ricerca e attivare il relativo flag.
+Nello specifico, occorre navigare nel menu `Settings` $\rightarrow$ `Policies` $\rightarrow$ `Behavioural Checks`, inserire il nome della metrica da abilitare nella barra di ricerca e attivare il relativo flag.
 
-Inoltre, dato che questo segnale richiede un periodo di apprendimento algoritmico per mappare le abitudini della rete, è possibile personalizzarne la durata dal menu: `Settings` $\rightarrow$ `Behavioural Analysis`, scorrendo la pagina fino alla voce *"Server Port Learning Period"*. Si consiglia di mantenere il valore predefinito proposto dal sistema.
+Inoltre, dato che il segnale **"Server Port Detected"** richiede un periodo di apprendimento algoritmico per mappare le abitudini della rete, è possibile personalizzarne la durata dal menu: `Settings` $\rightarrow$ `Behavioural Analysis`, scorrendo la pagina fino alla voce *"Server Port Learning Period"*. Si consiglia di mantenere il valore predefinito proposto dal sistema.
 
 ## 6. Esecuzione dello scoring finale e delle metriche singole
 Con ntopng in esecuzione, con l'esportazione attiva sul database di ClikHouse e l'ambiente virtuale `venv` abilitato, è possibile testare i **singoli script** Python lanciando da terminale il relativo comando:
