@@ -33,7 +33,7 @@ Logica:
          -> r_t = n_falliti / n_totali (rate corrente)
       2. Recupera la baseline contestuale (stessa categoria oraria,
          ultimi 7 giorni) -> r_mediano, MAD
-      3. Calcola lo Z-score robusto con il limite sulla MAD
+      3. Calcola lo Modified z-score  con il limite sulla MAD
       4. Applica le 5 condizioni di scatto in AND.
 
 Definizione operativa di "flusso fallito":
@@ -72,7 +72,7 @@ Formula matematica:
 
         MAD_eff = max(MAD, MAD_MIN_ASSOLUTA)
 
-    Lo Z-score robusto:
+    Lo Z-score modiefied:
 
         Z = (r_t - r_mediano) / MAD_eff
 
@@ -364,9 +364,9 @@ SELECT
     sb.mad AS mad,
     greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS mad_eff,
 
-    -- Z-score robusto senza valore assoluto (vogliamo solo aumenti)
+    -- Modified z-score senza valore assoluto (vogliamo solo aumenti)
     (fc.r_corrente - sb.r_mediano)
-        / greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS z_robusto,
+        / greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS z_modified,
 
     sb.bucket_count AS bucket_count,
     categoria_corrente AS categoria_temporale,
@@ -388,9 +388,9 @@ WHERE
     -- MIN_BASELINE_HOURS, sono già state applicate come HAVING nei CTE (4 e 2) flussi_correnti e mediane)
     fc.r_corrente > {R_MIN_OPERATIVO}
     AND fc.r_corrente > sb.r_mediano
-    AND z_robusto > {SOGLIA_Z}
+    AND z_modified > {SOGLIA_Z}
 
-ORDER BY z_robusto DESC
+ORDER BY z_modified DESC
 """
 
 
@@ -415,7 +415,7 @@ def calcola_m_fail(client):
             "r_mediano":           0.018,  <- rate mediano storico (1.8%)
             "mad":                 0.012,  <- MAD reale
             "mad_eff":             0.05,   <- MAD effettiva (limite attivo)
-            "z_robusto":           18.04,  <- Z-score robusto
+            "z_modified":          18.04,  <- Modified z-score
             "bucket_count":        38,     <- bucket validi nella baseline
             "categoria_temporale": "feriale_lavorativo",
             "breakdown": {                 <- causa dominante del fallimento
@@ -438,13 +438,13 @@ def calcola_m_fail(client):
 
     # Ogni riga contiene (in ordine):
     # host_ip, n_totali, n_falliti, r_corrente,
-    # r_mediano, mad, mad_eff, z_robusto,
+    # r_mediano, mad, mad_eff, z_modified,
     # bucket_count, categoria_temporale,
     # n_dst2src_zero, n_error_code, n_unidirectional,
     # n_tcp_issues, n_unresolved, n_probing,
     # M_fail
     for (host_ip, n_totali, n_falliti, r_corrente,
-         r_mediano, mad, mad_eff, z_robusto,
+         r_mediano, mad, mad_eff, z_modified,
          bucket_count, categoria_temporale,
          n_dst2src_zero, n_error_code, n_unidirectional,
          n_tcp_issues, n_unresolved, n_probing,
@@ -458,7 +458,7 @@ def calcola_m_fail(client):
             "r_mediano":           float(r_mediano),
             "mad":                 float(mad),
             "mad_eff":             float(mad_eff),
-            "z_robusto":           float(z_robusto),
+            "z_modified":          float(z_modified),
             "bucket_count":        bucket_count,
             "categoria_temporale": categoria_temporale,
             "breakdown": {
@@ -514,7 +514,7 @@ def stampa_report(host_ip: str, dati: dict):
     print(f"  Rate mediano storico  : {dati['r_mediano']*100:6.2f}%")
     print(f"  MAD reale             : {dati['mad']*100:6.2f}%")
     print(f"  MAD effettiva (floor) : {dati['mad_eff']*100:6.2f}%")
-    print(f"  Z-score robusto       : {dati['z_robusto']:6.2f}")
+    print(f"  Modified z-score       : {dati['z_modified']:6.2f}")
     print(f"  Causa dominante       : {causa} ({conteggio} flussi)")
     print(f"  Breakdown per causa   :")
     print(f"    error_code          : {dati['breakdown']['error_code']}")

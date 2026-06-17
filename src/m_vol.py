@@ -20,10 +20,10 @@ Formula operativa (vedere documento di decisioni progettuali per i dettagli):
                                                   - 10% mediana (scala-relativo)
                                                   - 1 MB assoluto (anti-inattività)
 
-    Z_robusto = ( V_out - mediana ) / MAD_eff <- direzionale, senza valore assoluto
+    Z_modified = ( V_out - mediana ) / MAD_eff <- direzionale, senza valore assoluto
 
     M_vol = 1  se e solo se:
-        Z_robusto > 3              (regola 99.7%)
+        Z_modified > 3              (regola 99.7%)
         AND V_out > mediana        (solo picchi in eccesso)
         AND V_out > 50 MB          (esfiltrazione)
 
@@ -84,7 +84,7 @@ from readconfig import (
 #
 # SELECT finale:
 # JOIN tra volume_corrente e statistiche_baseline,
-# calcolo di MAD_eff e Z_robusto, applicazione tripla condizione di scatto.
+# calcolo di MAD_eff e Z_modified, applicazione tripla condizione di scatto.
 
 FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
 
@@ -231,7 +231,7 @@ volume_corrente AS (
 -- =============================================================
 -- SELECT finale
 -- JOIN tra volume corrente e baseline statistica.
--- Calcola MAD effettiva e Z robusto, applica la tripla
+-- Calcola MAD effettiva e Z modified, applica la tripla
 -- condizione di scatto:
 --   1) Z > 3                       -> significatività statistica
 --   2) V_out > mediana             -> direzionalità (solo picchi)
@@ -247,11 +247,11 @@ SELECT
     -- greatest(a, b) = max(a, b) in ClickHouse
     greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS mad_eff,
 
-    -- Z robusto direzionale: senza valore assoluto.
+    -- Z modified direzionale: senza valore assoluto.
     -- Valori positivi -> traffico sopra mediana (potenziale esfiltrazione)
     -- Valori negativi -> traffico sotto mediana (host inattivo, non interessa)
     (vc.v_out - sb.v_mediano)
-        / greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS z_robusto,
+        / greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS z_modified,
 
     sb.bucket_count AS bucket_count,
     categoria_corrente AS categoria_temporale,
@@ -271,10 +271,10 @@ WHERE
     AND vc.v_out > sb.v_mediano
 
     -- Condizione 1: significatività statistica
-    AND z_robusto > {SOGLIA_Z}
+    AND z_modified > {SOGLIA_Z}
 
--- Ordino per Z robusto decrescente, così da portare in cima i casi più anomali.
-ORDER BY z_robusto DESC
+-- Ordino per Z modified decrescente, così da portare in cima i casi più anomali.
+ORDER BY z_modified DESC
 """
 
 
@@ -297,7 +297,7 @@ def calcola_m_vol(client):
             "v_mediano":            12_582_912,     # mediana baseline contestuale
             "mad":                  3_145_728,      # MAD grezza
             "mad_eff":              3_145_728,      # MAD effettiva
-            "z_robusto":            21.0,           # Z-score effettivo
+            "z_modified":           21.0,           # Z-score effettivo
             "categoria_temporale":  "feriale_lavorativo",
             "bucket_baseline":      44,             # campioni usati per la baseline
             "penalita":             20,
@@ -313,9 +313,9 @@ def calcola_m_vol(client):
 
     # Ogni riga contiene:
     # (host_ip, v_out, v_mediano, mad, mad_eff,
-    #  z_robusto, bucket_count, categoria_temporale, M_vol)
+    #  z_modified, bucket_count, categoria_temporale, M_vol)
     for (host_ip, v_out, v_mediano, mad, mad_eff,
-         z_robusto, bucket_count, categoria_temporale, m_vol) in righe:
+         z_modified, bucket_count, categoria_temporale, m_vol) in righe:
 
         risultati[host_ip] = {
             "M_vol":               m_vol,
@@ -323,7 +323,7 @@ def calcola_m_vol(client):
             "v_mediano":           int(v_mediano),
             "mad":                 int(mad),
             "mad_eff":             int(mad_eff),
-            "z_robusto":           float(z_robusto),
+            "z_modified":          float(z_modified),
             "categoria_temporale": categoria_temporale,
             "bucket_baseline":     bucket_count,
             "penalita":            PESO_M_VOL * m_vol,  # 20 se M_vol=1, 0 altrimenti
@@ -363,7 +363,7 @@ def stampa_report(host_ip: str, dati: dict):
     print(f"  V_mediano (baseline): {formatta_byte(dati['v_mediano'])}")
     print(f"  MAD (grezza)        : {formatta_byte(dati['mad'])}")
     print(f"  MAD effettiva       : {formatta_byte(dati['mad_eff'])}")
-    print(f"  Z robusto           : {dati['z_robusto']:.2f}")
+    print(f"  Z modified           : {dati['z_modified']:.2f}")
     print(f"  Penalità M_vol     : +{dati['penalita']} punti")
     print()
 
@@ -381,7 +381,7 @@ def main():
     print(f"  Avvio analisi M_vol - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print(f"  Finestra storica baseline : {FINESTRA_STORICO_GIORNI} giorni")
     print(f"  Finestra ora corrente     : {FINESTRA_CORRENTE_ORE} ora")
-    print(f"  Soglia Z robusto          : > {SOGLIA_Z}")
+    print(f"  Soglia Z modified          : > {SOGLIA_Z}")
     print(f"  Soglia operativa V_min    : > {formatta_byte(V_MIN_OPERATIVO)}")
     print(f"  Floor MAD (frazione)      : {MAD_MIN_FRAZIONE * 100:.0f}% della mediana")
     print(f"  Min bucket baseline       : {MIN_BASELINE_HOURS}")
