@@ -1,0 +1,593 @@
+(venv) diego@diego-Zenbook-UX3402ZA-UX3402ZA:~/Progetti/tesi_milletti/src$ python scoring.py 
+===========================================================================
+  SISTEMA DI RILEVAMENTO ANOMALIE - SCORING ORARIO
+  Esecuzione: 2026-06-21 16:16:24 UTC
+  Metriche attive: 8
+===========================================================================
+
+[setup] Connessione a ClickHouse... OK
+
+[fase 1] Esecuzione delle metriche di rilevamento
+
+  [run] M_rep    (Destination reputation)... OK (0 host flaggati)
+  [run] M_cert   (TLS certificate anomalies)... OK (22 host flaggati)
+  [run] M_sni    (SNI evasion)... OK (28 host flaggati)
+  [run] M_srv    (Server role detection)... OK (0 host flaggati)
+  [run] M_proto  (Non-standard port/protocol)... OK (29 host flaggati)
+  [run] M_scan   (Network discovery)... OK (0 host flaggati)
+  [run] M_vol    (Asimmetria volumetrica)... OK (0 host flaggati)
+  [run] M_fail   (Connection failure rate)... OK (0 host flaggati)
+
+[fase 2] Aggregazione dei risultati per host
+  Host unici flaggati da almeno una metrica: 47
+
+===========================================================================
+  [fase 3] STATO DELLA RETE
+===========================================================================
+  Host osservati con almeno 1 metrica attiva : 47
+
+  Distribuzione per fascia:
+    Verde   (0-29)  :   0
+    Giallo  (30-59) :  16
+    Rosso   (60-100):  31
+
+  Score massimo della rete : 100
+  Fascia globale           : [!!] ROSSO
+
+  >> RETE COMPROMESSA: almeno un host ha superato la soglia
+     di intervento. è richiesta verifica immediata.
+
+===========================================================================
+  TABELLA HOST SOSPETTI (zona Giallo/Rosso, ordinati per score)
+===========================================================================
+  Host               Score  Fascia   Metriche attive
+  ------------------ -----  -------  --------------------------------
+  192.168.137.185      100  [!!] ROSSO  M_cert, M_sni, M_proto
+  192.168.137.68        90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.209       90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.17        90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.42        90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.174       90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.242       90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.65        90  [!!] ROSSO  M_cert, M_sni
+  192.168.137.241       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.141       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.64        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.123       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.117       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.97        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.44        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.93        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.61        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.172       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.142       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.112       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.66        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.109       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.181       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.134       80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.98        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.89        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.22        80  [!!] ROSSO  M_sni, M_proto
+  192.168.137.237       70  [!!] ROSSO  M_cert, M_proto
+  192.168.137.129       70  [!!] ROSSO  M_cert, M_proto
+  192.168.137.140       70  [!!] ROSSO  M_cert, M_proto
+  192.168.137.87        70  [!!] ROSSO  M_cert, M_proto
+  192.168.137.29        50  [ !] GIALLO M_sni
+  192.168.137.254       40  [ !] GIALLO M_cert
+  192.168.137.58        40  [ !] GIALLO M_cert
+  192.168.137.103       40  [ !] GIALLO M_cert
+  192.168.137.186       40  [ !] GIALLO M_cert
+  192.168.137.108       40  [ !] GIALLO M_cert
+  192.168.137.206       40  [ !] GIALLO M_cert
+  192.168.137.191       40  [ !] GIALLO M_cert
+  192.168.137.38        40  [ !] GIALLO M_cert
+  192.168.137.118       40  [ !] GIALLO M_cert
+  192.168.137.190       40  [ !] GIALLO M_cert
+  192.168.137.163       30  [ !] GIALLO M_proto
+  192.168.137.162       30  [ !] GIALLO M_proto
+  192.168.137.248       30  [ !] GIALLO M_proto
+  192.168.137.1         30  [ !] GIALLO M_proto
+  192.168.137.100       30  [ !] GIALLO M_proto
+
+===========================================================================
+  DETTAGLIO HOST CRITICI (fascia giallo e rosso)
+===========================================================================
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.185  ->  Score: 100/100  (ROSSO)
+      (penalità grezza pre-saturazione: 120)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 4
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 4
+    > M_sni    (+50 punti)
+         hits_missing          : 2
+    > M_proto  (+30 punti)
+         hits_totali           : 6
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 50920']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.68  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 16
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 16
+    > M_sni    (+50 punti)
+         hits_missing          : 14
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.209  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 14
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 14
+    > M_sni    (+50 punti)
+         hits_missing          : 4
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.17  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 12
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 12
+    > M_sni    (+50 punti)
+         hits_missing          : 10
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.42  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 8
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 8
+    > M_sni    (+50 punti)
+         hits_missing          : 8
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.174  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 6
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 6
+    > M_sni    (+50 punti)
+         hits_missing          : 6
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.242  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 2
+         hits_expired          : 2
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 4
+    > M_sni    (+50 punti)
+         hits_missing          : 4
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.65  ->  Score: 90/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 2
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 2
+    > M_sni    (+50 punti)
+         hits_missing          : 2
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.241  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 42
+    > M_proto  (+30 punti)
+         hits_totali           : 14
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.141  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 32
+    > M_proto  (+30 punti)
+         hits_totali           : 32
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.64  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 30
+    > M_proto  (+30 punti)
+         hits_totali           : 30
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.123  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 26
+    > M_proto  (+30 punti)
+         hits_totali           : 26
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.117  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 26
+    > M_proto  (+30 punti)
+         hits_totali           : 28
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.97  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 24
+    > M_proto  (+30 punti)
+         hits_totali           : 24
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.44  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 24
+    > M_proto  (+30 punti)
+         hits_totali           : 20
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.93  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 20
+    > M_proto  (+30 punti)
+         hits_totali           : 20
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.61  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 18
+    > M_proto  (+30 punti)
+         hits_totali           : 22
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.172  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 16
+    > M_proto  (+30 punti)
+         hits_totali           : 16
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.142  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 14
+    > M_proto  (+30 punti)
+         hits_totali           : 20
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 1883']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.112  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 14
+    > M_proto  (+30 punti)
+         hits_totali           : 20
+         combinazioni_distinte : 2
+         lista_mismatch        : ['TLS su porta 8886', 'TLS su porta 20443']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.66  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 14
+    > M_proto  (+30 punti)
+         hits_totali           : 16
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.109  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 14
+    > M_proto  (+30 punti)
+         hits_totali           : 18
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.181  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 12
+    > M_proto  (+30 punti)
+         hits_totali           : 16
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.134  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 8
+    > M_proto  (+30 punti)
+         hits_totali           : 14
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.98  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 4
+    > M_proto  (+30 punti)
+         hits_totali           : 8
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.89  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 4
+    > M_proto  (+30 punti)
+         hits_totali           : 10
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.22  ->  Score: 80/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 2
+    > M_proto  (+30 punti)
+         hits_totali           : 6
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8886']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.237  ->  Score: 70/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 68
+         hits_mismatch         : 40
+         hits_sha1             : 0
+         hits_totali           : 108
+    > M_proto  (+30 punti)
+         hits_totali           : 70
+         combinazioni_distinte : 3
+         lista_mismatch        : ['TLS su porta 8883', 'TLS.AmazonAWS su porta 8883', 'TLS su porta 8443']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.129  ->  Score: 70/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 30
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 30
+    > M_proto  (+30 punti)
+         hits_totali           : 4
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 5223']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.140  ->  Score: 70/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 0
+         hits_mismatch         : 8
+         hits_sha1             : 0
+         hits_totali           : 8
+    > M_proto  (+30 punti)
+         hits_totali           : 10
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8883']
+
+---------------------------------------------------------------------------
+  [!!] HOST 192.168.137.87  ->  Score: 70/100  (ROSSO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 4
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 4
+    > M_proto  (+30 punti)
+         hits_totali           : 16
+         combinazioni_distinte : 2
+         lista_mismatch        : ['TLS su porta 8883', 'TLS.AmazonAWS su porta 8883']
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.29  ->  Score: 50/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_sni    (+50 punti)
+         hits_missing          : 10
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.254  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 44
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 44
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.58  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 40
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 40
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.103  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 12
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 12
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.186  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 10
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 10
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.108  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 10
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 10
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.206  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 8
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 8
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.191  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 4
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 4
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.38  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 4
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 4
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.118  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 2
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 2
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.190  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 0
+         hits_expired          : 2
+         hits_mismatch         : 0
+         hits_sha1             : 0
+         hits_totali           : 2
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.163  ->  Score: 30/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_proto  (+30 punti)
+         hits_totali           : 6
+         combinazioni_distinte : 2
+         lista_mismatch        : ['HTTP.JSON su porta 8002', 'HTTP su porta 8888']
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.162  ->  Score: 30/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_proto  (+30 punti)
+         hits_totali           : 4
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 8009']
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.248  ->  Score: 30/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_proto  (+30 punti)
+         hits_totali           : 4
+         combinazioni_distinte : 2
+         lista_mismatch        : ['TLS su porta 5228', 'TLS su porta 46182']
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.1  ->  Score: 30/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_proto  (+30 punti)
+         hits_totali           : 2
+         combinazioni_distinte : 1
+         lista_mismatch        : ['HTTP su porta 60000']
+
+---------------------------------------------------------------------------
+  [ !] HOST 192.168.137.100  ->  Score: 30/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_proto  (+30 punti)
+         hits_totali           : 2
+         combinazioni_distinte : 1
+         lista_mismatch        : ['TLS su porta 5228']
+
+===========================================================================
+  FINE ESECUZIONE
+===========================================================================
+
