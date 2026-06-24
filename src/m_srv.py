@@ -1,25 +1,33 @@
 """
 =============================================================================
 SISTEMA DI RILEVAMENTO ANOMALIE DI RETE
-Metrica M_srv - Server Role Detection
+Metrica M_srv - Server port detected
 =============================================================================
 
 Obiettivo:
-    Rilevare l'inversione di ruolo in cui un host della LAN, abitualmente
-    client, comincia improvvisamente ad accettare connessioni in entrata
-    comportandosi come server. È uno dei segnali più forti di una
-    backdoor installata o di un'apertura non autorizzata di servizi.
+    Segnalare gli host interni che iniziano a contattare una porta server
+    non presente nel loro profilo storico di contatti. ntopng costruisce,
+    per ogni host, l'insieme delle porte server che l'host contatta
+    abitualmente; quando, terminato il learning period, compare
+    un contatto verso una nuova porta server, genera l'allarme nativo
+    (alert_id = 29).
+
+    È un segnale debole di comunicazione in uscita verso un
+    servizio/porta non visto prima (possibile indizio di nuovo traffico
+    anomalo, contatto C2 o movimento laterale), non una prova di
+    compromissione. Una semplice query DNS verso un resolver mai usato
+    prima è sufficiente a farlo scattare.
 
 Logica:
-    ntopng mantiene un profilo per ogni host della rete.
-    Dopo un periodo di apprendimento (scelto in base alle esigenze),
-    se rileva che l'host inizia ad agire come "Responder"
-    (cioè invia SYN-ACK in risposta a SYN ricevuti) su una
-    porta nuova, genera l'allarme nativo "Server Port Detected"
-    (alert_id = 29) nella tabella `host_alerts`.
+    ntopng mantiene per ogni host un profilo delle porte server contattate.
+    Dopo un periodo di apprendimento, se l'host contatta una nuova porta server
+    rispetto a quelle del learning period, genera l'allarme "Server Port Detected"
+    (alert_id = 29, host_alert_server_ports_contacts).
 
-    Peso STATICO di +30 punti per qualsiasi nuova porta server rilevata
-    su un host della LAN interna.
+    Peso STATICO di +20 punti per qualsiasi nuova porta server contattata
+    da un host della LAN interna. Il peso statico (invece di un peso
+    proporzionale al numero di porte o di hit) limita l'impatto dei casi
+    in cui il contatto verso una porta server nuova è del tutto legittimo.
 
 Frequenza di esecuzione:
     Event-driven (metrica deterministica): lo script va eseguito ogni ora
@@ -28,8 +36,10 @@ Frequenza di esecuzione:
 Fonte dei dati:
     Tabella `host_alerts` di ntopng su ClickHouse.
     Filtro: alert_id = 29 (host_alert_server_ports_contacts).
-    La porta è estratta dal campo JSON: JSONExtractInt(json, 'port').
-    Il dettaglio delle porte è utile per il report, ma non influisce sul punteggio (peso statico).
+    La porta server contattata è estratta dal campo JSON:
+    JSONExtractInt(json, 'port').
+    Il dettaglio delle porte è utile per il report, ma non influisce sul
+    punteggio (peso statico).
 
 Soglie di rischio dello score finale S(h):
     Verde  ->  0-29  punti  (host sicuro)
@@ -106,8 +116,8 @@ def calcola_m_srv(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     # o passato esplicitamente come argomento di funzione), quindi è
     # sicuro inserirlo via f-string senza rischio di SQL injection.
     #
-    # `filtro_lan` è costruito dal modulo condiviso network_config: limita
-    # l'analisi ai soli host della LAN interna (RFC 1918). In host_alerts
+    # `filtro_lan` è costruito dal file di configurazione "config.ini":
+    #  questo, limita l'analisi ai soli host della LAN interna (RFC 1918). In host_alerts
     # la colonna `ip` è già una stringa, quindi nessuna conversione.
     filtro_lan = costruisci_filtro_lan("ip")
 
@@ -146,7 +156,7 @@ def calcola_m_srv(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
         -- Numero totale di allarmi Server Port Detected per l'host
         count() AS hits_totali,
 
-        -- Numero di porte distinte rilevate come "server"
+        -- Numero di porte distinte rilevate
         uniqExact(port_extracted) AS porte_distinte,
 
         -- Lista delle porte (utile per il report, max 10)
@@ -216,7 +226,7 @@ def main():
     """
     # Parsing degli argomenti da riga di comando
     parser = argparse.ArgumentParser(
-        description="Calcolo della metrica M_srv (Server Role Detection)."
+        description="Calcolo della metrica M_srv (Server Port Detected)."
     )
     parser.add_argument(
         "--finestra-minuti",
@@ -260,7 +270,7 @@ def main():
 
     # Report dei risultati
     if not host_flaggati:
-        print(f"[OK] Nessun host flagged - nessun nuovo server rilevato negli ultimi {args.finestra_minuti} minuto/i.\n")
+        print(f"[OK] Nessun host flagged - nessun nuova porta server rilevata negli ultimi {args.finestra_minuti} minuto/i.\n")
         return
 
     print(f"[!] {len(host_flaggati)} host flagged dalla metrica M_srv:\n")

@@ -63,7 +63,7 @@ METRICHE = [
     ("M_rep",   "Destination reputation",     calcola_m_rep),
     ("M_cert",  "TLS certificate anomalies",  calcola_m_cert),
     ("M_sni",   "SNI evasion",                calcola_m_sni),
-    ("M_srv",   "Server role detection",      calcola_m_srv),
+    ("M_srv",   "Server port detected",      calcola_m_srv),
     ("M_proto", "Non-standard port/protocol", calcola_m_proto),
     ("M_scan",  "Network discovery",          calcola_m_scan),
     ("M_vol",   "Asimmetria volumetrica",     calcola_m_vol),
