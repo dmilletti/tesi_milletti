@@ -26,7 +26,7 @@ Profili dei 4 host di test:
 
     Host A (10.0.0.1) - "Office tranquillo"
         Baseline:  ~150 flussi/ora con 1-3% di fallimenti
-                   (rate mediano ~2%, MAD ~1%)
+                   (rate mediana ~2%, MAD ~1%)
         Corrente:  200 flussi, ~2% falliti (dentro la tolleranza)
         Attesa:    M_fail = 0 (NON deve scattare)
 
@@ -324,7 +324,7 @@ def genera_flussi_bucket(bucket_start: datetime, host_ip: str,
 def genera_dati_host_A(bucket_categoria: list, flow_id_start: int) -> tuple[list, int]:
     """
     Host A - office tranquillo.
-    Baseline: ~150 flussi/ora, 1-3% falliti (rate mediano ~2%, MAD ~1%)
+    Baseline: ~150 flussi/ora, 1-3% falliti (rate mediana ~2%, MAD ~1%)
     Corrente: 200 flussi, ~2% falliti (dentro tolleranza)
     """
     righe = []
@@ -612,7 +612,7 @@ flussi_storici AS (
 mediane AS (
     SELECT
         host_ip,
-        median(rate_bucket) AS r_mediano,
+        median(rate_bucket) AS r_mediana,
         count()             AS bucket_count
     FROM flussi_storici
     GROUP BY host_ip
@@ -622,9 +622,9 @@ mediane AS (
 statistiche_baseline AS (
     SELECT
         fs.host_ip,
-        any(m.r_mediano)                          AS r_mediano,
+        any(m.r_mediana)                          AS r_mediana,
         any(m.bucket_count)                       AS bucket_count,
-        median(abs(fs.rate_bucket - m.r_mediano)) AS mad
+        median(abs(fs.rate_bucket - m.r_mediana)) AS mad
     FROM flussi_storici AS fs
     INNER JOIN mediane AS m ON fs.host_ip = m.host_ip
     GROUP BY fs.host_ip
@@ -668,11 +668,11 @@ SELECT
     fc.n_flussi_totali AS n_totali,
     fc.n_flussi_falliti AS n_falliti,
     fc.r_corrente AS r_corrente,
-    sb.r_mediano AS r_mediano,
+    sb.r_mediana AS r_mediana,
     sb.mad AS mad,
     greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS mad_eff,
-    (fc.r_corrente - sb.r_mediano)
-        / greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS z_robusto,
+    (fc.r_corrente - sb.r_mediana)
+        / greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS z_modified,
     sb.bucket_count AS bucket_count,
     categoria_corrente AS categoria_temporale,
     fc.n_dst2src_zero AS n_dst2src_zero,
@@ -686,9 +686,9 @@ FROM flussi_correnti AS fc
 INNER JOIN statistiche_baseline AS sb ON fc.host_ip = sb.host_ip
 WHERE
     fc.r_corrente > {R_MIN_OPERATIVO}
-    AND fc.r_corrente > sb.r_mediano
-    AND z_robusto > {SOGLIA_Z}
-ORDER BY z_robusto DESC
+    AND fc.r_corrente > sb.r_mediana
+    AND z_modified > {SOGLIA_Z}
+ORDER BY z_modified DESC
 """
 
 
@@ -697,7 +697,7 @@ def esegui_query_m_fail(client) -> dict:
     risultati = {}
     righe = client.query(QUERY_M_FAIL_TEST).result_rows
     for (host_ip, n_totali, n_falliti, r_corrente,
-         r_mediano, mad, mad_eff, z_robusto,
+         r_mediana, mad, mad_eff, z_modified,
          bucket_count, categoria_temporale,
          n_dst2src_zero, n_error_code, n_unidirectional,
          n_tcp_issues, n_unresolved, n_probing,
@@ -707,10 +707,10 @@ def esegui_query_m_fail(client) -> dict:
             "n_totali":            n_totali,
             "n_falliti":           n_falliti,
             "r_corrente":          float(r_corrente),
-            "r_mediano":           float(r_mediano),
+            "r_mediana":           float(r_mediana),
             "mad":                 float(mad),
             "mad_eff":             float(mad_eff),
-            "z_robusto":           float(z_robusto),
+            "z_modified":           float(z_modified),
             "bucket_count":        bucket_count,
             "categoria_temporale": categoria_temporale,
             "breakdown": {
@@ -749,7 +749,7 @@ def verifica_risultati(risultati: dict) -> list:
         esiti.append({
             "host": HOST_A_IP, "profilo": "Office tranquillo",
             "esito": "FAIL",
-            "dettagli": (f"Presente con Z={r['z_robusto']:.2f}, "
+            "dettagli": (f"Presente con Z={r['z_modified']:.2f}, "
                          f"r_corrente={r['r_corrente']*100:.2f}%. "
                          f"Atteso: assente.")
         })
@@ -762,8 +762,8 @@ def verifica_risultati(risultati: dict) -> list:
             problemi.append(f"M_fail={r['M_fail']} invece di 1")
         if r["penalita"] != 30:
             problemi.append(f"penalita={r['penalita']} invece di 30")
-        if r["z_robusto"] <= 3:
-            problemi.append(f"z_robusto={r['z_robusto']:.2f} non > 3")
+        if r["z_modified"] <= 3:
+            problemi.append(f"z_modified={r['z_modified']:.2f} non > 3")
         if r["r_corrente"] <= 0.30:
             problemi.append(f"r_corrente={r['r_corrente']*100:.1f}% non > 30%")
         # Causa dominante deve essere unresolved o error_code (entrambe contano in mix_dga)
@@ -782,7 +782,7 @@ def verifica_risultati(risultati: dict) -> list:
             esiti.append({
                 "host": HOST_B_IP, "profilo": "DGA via DNS",
                 "esito": "PASS",
-                "dettagli": (f"Rilevato: Z={r['z_robusto']:.2f}, "
+                "dettagli": (f"Rilevato: Z={r['z_modified']:.2f}, "
                              f"r_corrente={r['r_corrente']*100:.1f}%, "
                              f"causa={causa_top[0]}({causa_top[1]}), "
                              f"+{r['penalita']} punti")
@@ -821,7 +821,7 @@ def verifica_risultati(risultati: dict) -> list:
                 "esito": "PASS",
                 "dettagli": (f"Rilevato: MAD_reale={r['mad']:.4f} -> "
                              f"MAD_eff={r['mad_eff']:.4f} (floor attivo), "
-                             f"Z={r['z_robusto']:.2f}, "
+                             f"Z={r['z_modified']:.2f}, "
                              f"r_corrente={r['r_corrente']*100:.1f}%, "
                              f"+{r['penalita']} punti")
             })
@@ -872,10 +872,10 @@ def stampa_report_risultati(risultati: dict):
         print(f"    n_totali            : {r['n_totali']}")
         print(f"    n_falliti           : {r['n_falliti']}")
         print(f"    r_corrente          : {r['r_corrente']*100:.2f}%")
-        print(f"    r_mediano           : {r['r_mediano']*100:.2f}%")
+        print(f"    r_mediana           : {r['r_mediana']*100:.2f}%")
         print(f"    mad (reale)         : {r['mad']:.4f} ({r['mad']*100:.2f}%)")
         print(f"    mad_eff             : {r['mad_eff']:.4f} ({r['mad_eff']*100:.2f}%)")
-        print(f"    z_robusto           : {r['z_robusto']:.2f}")
+        print(f"    z_modified          : {r['z_modified']:.2f}")
         print(f"    bucket_count        : {r['bucket_count']}")
         print(f"    categoria_temporale : {r['categoria_temporale']}")
         print(f"    breakdown           :")

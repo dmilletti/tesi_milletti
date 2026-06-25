@@ -483,7 +483,7 @@ baseline_grezza AS (
 mediane AS (
     SELECT
         host_ip,
-        median(v_bucket) AS v_mediano,
+        median(v_bucket) AS v_mediana,
         count() AS bucket_count
     FROM baseline_grezza
     GROUP BY host_ip
@@ -493,9 +493,9 @@ mediane AS (
 statistiche_baseline AS (
     SELECT
         bg.host_ip,
-        any(m.v_mediano)    AS v_mediano,
+        any(m.v_mediana)    AS v_mediana,
         any(m.bucket_count) AS bucket_count,
-        median(abs(bg.v_bucket - m.v_mediano)) AS mad
+        median(abs(bg.v_bucket - m.v_mediana)) AS mad
     FROM baseline_grezza AS bg
     INNER JOIN mediane AS m ON bg.host_ip = m.host_ip
     GROUP BY bg.host_ip
@@ -520,15 +520,15 @@ volume_corrente AS (
 SELECT
     vc.host_ip                                            AS host_ip,
     vc.v_out                                              AS v_out,
-    sb.v_mediano                                          AS v_mediano,
+    sb.v_mediana                                          AS v_mediana,
     sb.mad                                                AS mad,
     greatest(sb.mad,
-             sb.v_mediano * {MAD_MIN_FRAZIONE},
+             sb.v_mediana * {MAD_MIN_FRAZIONE},
              {MAD_MIN_ASSOLUTO})                          AS mad_eff,
-    (vc.v_out - sb.v_mediano)
+    (vc.v_out - sb.v_mediana)
         / greatest(sb.mad,
-                   sb.v_mediano * {MAD_MIN_FRAZIONE},
-                   {MAD_MIN_ASSOLUTO})                    AS z_robusto,
+                   sb.v_mediana * {MAD_MIN_FRAZIONE},
+                   {MAD_MIN_ASSOLUTO})                    AS z_modified,
     sb.bucket_count                                       AS bucket_count,
     categoria_corrente                                    AS categoria_temporale,
     1 AS M_vol
@@ -537,10 +537,10 @@ FROM volume_corrente AS vc
 INNER JOIN statistiche_baseline AS sb ON vc.host_ip = sb.host_ip
 WHERE
     vc.v_out > {V_MIN_OPERATIVO}
-    AND vc.v_out > sb.v_mediano
-    AND z_robusto > {SOGLIA_Z}
+    AND vc.v_out > sb.v_mediana
+    AND z_modified > {SOGLIA_Z}
 
-ORDER BY z_robusto DESC
+ORDER BY z_modified DESC
 """
 
 
@@ -548,15 +548,15 @@ def esegui_query_m_vol(client) -> dict:
     """Esegue la query e restituisce un dizionario host_ip -> dettagli."""
     risultati = {}
     righe = client.query(QUERY_M_VOL_TEST).result_rows
-    for (host_ip, v_out, v_mediano, mad, mad_eff,
-         z_robusto, bucket_count, categoria_temporale, m_vol) in righe:
+    for (host_ip, v_out, v_mediana, mad, mad_eff,
+         z_modified, bucket_count, categoria_temporale, m_vol) in righe:
         risultati[host_ip] = {
             "M_vol": m_vol,
             "v_out": int(v_out),
-            "v_mediano": int(v_mediano),
+            "v_mediana": int(v_mediana),
             "mad": float(mad),
             "mad_eff": float(mad_eff),
-            "z_robusto": float(z_robusto),
+            "z_modified": float(z_modified),
             "bucket_count": bucket_count,
             "categoria_temporale": categoria_temporale,
             "penalita": PESO_M_VOL * m_vol,
@@ -587,7 +587,7 @@ def verifica_risultati(risultati: dict) -> list:
         esiti.append({
             "host": HOST_A_IP, "profilo": "Office tranquillo",
             "esito": "FAIL",
-            "dettagli": f"Presente con Z={r['z_robusto']:.2f}, "
+            "dettagli": f"Presente con Z={r['z_modified']:.2f}, "
                         f"v_out={formatta_byte(r['v_out'])}. "
                         f"Atteso: assente."
         })
@@ -600,8 +600,8 @@ def verifica_risultati(risultati: dict) -> list:
             problemi.append(f"M_vol={r['M_vol']} invece di 1")
         if r["penalita"] != 20:
             problemi.append(f"penalita={r['penalita']} invece di 20")
-        if r["z_robusto"] <= 3:
-            problemi.append(f"z_robusto={r['z_robusto']:.2f} non > 3")
+        if r["z_modified"] <= 3:
+            problemi.append(f"z_modified={r['z_modified']:.2f} non > 3")
         if r["v_out"] != 200 * 1024 * 1024:
             problemi.append(f"v_out={formatta_byte(r['v_out'])} invece di 200 MB")
         if problemi:
@@ -614,8 +614,8 @@ def verifica_risultati(risultati: dict) -> list:
             esiti.append({
                 "host": HOST_B_IP, "profilo": "Esfiltrazione",
                 "esito": "PASS",
-                "dettagli": (f"Rilevato: Z={r['z_robusto']:.2f}, "
-                             f"mediana={formatta_byte(r['v_mediano'])}, "
+                "dettagli": (f"Rilevato: Z={r['z_modified']:.2f}, "
+                             f"mediana={formatta_byte(r['v_mediana'])}, "
                              f"MAD={formatta_byte(r['mad'])}, "
                              f"+{r['penalita']} punti")
             })
@@ -658,7 +658,7 @@ def verifica_risultati(risultati: dict) -> list:
                 "dettagli": (f"Rilevato: MAD_grezza={r['mad']:.0f} -> "
                              f"MAD_eff={formatta_byte(r['mad_eff'])} "
                              f"(floor assoluto attivo), "
-                             f"Z={r['z_robusto']:.2f}, +{r['penalita']} punti")
+                             f"Z={r['z_modified']:.2f}, +{r['penalita']} punti")
             })
     else:
         esiti.append({
@@ -705,10 +705,10 @@ def stampa_report_risultati(risultati: dict):
         print(f"\n  Host {host_ip}:")
         print(f"    M_vol               : {r['M_vol']}")
         print(f"    v_out               : {formatta_byte(r['v_out'])}")
-        print(f"    v_mediano           : {formatta_byte(r['v_mediano'])}")
+        print(f"    v_mediana           : {formatta_byte(r['v_mediana'])}")
         print(f"    mad (grezza)        : {formatta_byte(r['mad'])}")
         print(f"    mad_eff             : {formatta_byte(r['mad_eff'])}")
-        print(f"    z_robusto           : {r['z_robusto']:.2f}")
+        print(f"    z_modified           : {r['z_modified']:.2f}")
         print(f"    bucket_count        : {r['bucket_count']}")
         print(f"    categoria_temporale : {r['categoria_temporale']}")
         print(f"    penalita            : +{r['penalita']}")

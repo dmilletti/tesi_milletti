@@ -10,7 +10,7 @@ Obiettivo:
     e da ntopng. Se la formula qui non funziona, nessun test successivo può funzionare.
 
 Cosa viene testato:
-    - Calcolo dello Z robusto direzionale
+    - Calcolo dello Z modified direzionale
     - Applicazione del triplo limite sulla MAD:
         MAD_eff = max(MAD, 0.10 * mediana, MAD_MIN_ASSOLUTO)
     - Tripla condizione di scatto (Z > 3 AND v_out > mediana AND v_out > V_min)
@@ -38,17 +38,17 @@ PESO_M_VOL       = 20
 # Replichiamo qui la logica della formula come funzioni Python,
 # che restituiscono gli stessi valori della query SQL.
 
-def calcola_mad_effettiva(mad: float, v_mediano: float) -> float:
+def calcola_mad_effettiva(mad: float, v_mediana: float) -> float:
     """
     Implementa il limite sulla MAD con tre termini:
         MAD_eff = max( MAD, 0.10 * mediana, MAD_MIN_ASSOLUTO )
     """
-    return max(mad, v_mediano * MAD_MIN_FRAZIONE, MAD_MIN_ASSOLUTO)
+    return max(mad, v_mediana * MAD_MIN_FRAZIONE, MAD_MIN_ASSOLUTO)
 
 
-def calcola_z_robusto(v_out: float, v_mediano: float, mad: float) -> float:
+def calcola_z_modified(v_out: float, v_mediana: float, mad: float) -> float:
     """
-    Implementa lo Z robusto direzionale:
+    Implementa lo Z modified direzionale:
         Z = (V_out - mediana) / MAD_eff
 
     Nota: senza valore assoluto. Valori negativi sono consentiti (significano
@@ -60,13 +60,13 @@ def calcola_z_robusto(v_out: float, v_mediano: float, mad: float) -> float:
     è mantenuta sicura per eventuali futuri scenari in cui MAD_MIN_ASSOLUTO
     venisse abbassato a zero in fase di sperimentazione.
     """
-    mad_eff = calcola_mad_effettiva(mad, v_mediano)
+    mad_eff = calcola_mad_effettiva(mad, v_mediana)
     if mad_eff == 0:
-        return float('inf') if v_out > v_mediano else float('-inf')
-    return (v_out - v_mediano) / mad_eff
+        return float('inf') if v_out > v_mediana else float('-inf')
+    return (v_out - v_mediana) / mad_eff
 
 
-def valuta_m_vol(v_out: float, v_mediano: float, mad: float) -> dict:
+def valuta_m_vol(v_out: float, v_mediana: float, mad: float) -> dict:
     """
     Implementa la tripla condizione di scatto:
         M_vol = 1  <=>  Z > 3  AND  v_out > mediana  AND  v_out > V_min
@@ -74,21 +74,21 @@ def valuta_m_vol(v_out: float, v_mediano: float, mad: float) -> dict:
     Restituisce un dizionario con tutti i valori intermedi, utile per
     verificare passo dopo passo cosa è successo nel calcolo.
     """
-    mad_eff = calcola_mad_effettiva(mad, v_mediano)
-    z_robusto = calcola_z_robusto(v_out, v_mediano, mad)
+    mad_eff = calcola_mad_effettiva(mad, v_mediana)
+    z_modified = calcola_z_modified(v_out, v_mediana, mad)
 
-    cond_statistica  = z_robusto > SOGLIA_Z
-    cond_direzione   = v_out > v_mediano
+    cond_statistica  = z_modified > SOGLIA_Z
+    cond_direzione   = v_out > v_mediana
     cond_operativa   = v_out > V_MIN_OPERATIVO
 
     m_vol = 1 if (cond_statistica and cond_direzione and cond_operativa) else 0
 
     return {
         "v_out":            v_out,
-        "v_mediano":        v_mediano,
+        "v_mediana":        v_mediana,
         "mad":              mad,
         "mad_eff":          mad_eff,
-        "z_robusto":        z_robusto,
+        "z_modified":       z_modified,
         "cond_statistica":  cond_statistica,
         "cond_direzione":   cond_direzione,
         "cond_operativa":   cond_operativa,
@@ -128,7 +128,7 @@ def formatta_z(z: float) -> str:
 # =============================================================================
 # CASI DI TEST
 # =============================================================================
-# Ogni caso è una tupla (nome, descrizione, v_out, v_mediano, mad, attesi)
+# Ogni caso è una tupla (nome, descrizione, v_out, v_mediana, mad, attesi)
 # dove "attesi" è il dizionario dei valori che ci aspettiamo dalla formula.
 
 # Per ogni caso verifichiamo SOLO i campi presenti in "attesi": questo permette
@@ -146,7 +146,7 @@ CASI_DI_TEST = [
             "Caso di esfiltrazione: tutti e tre i flag devono attivarsi."
         ),
         "v_out":     78  * 1024 * 1024,   # 78 MB
-        "v_mediano": 12.5 * 1024 * 1024,  # 12.5 MB
+        "v_mediana": 12.5 * 1024 * 1024,  # 12.5 MB
         "mad":       2.8 * 1024 * 1024,   # 2.8 MB
         "attesi": {
             "M_vol": 1,
@@ -164,7 +164,7 @@ CASI_DI_TEST = [
             "Variazione del 12% rispetto alla mediana, ben dentro la tolleranza."
         ),
         "v_out":     14   * 1024 * 1024,
-        "v_mediano": 12.5 * 1024 * 1024,
+        "v_mediana": 12.5 * 1024 * 1024,
         "mad":       2.8  * 1024 * 1024,
         "attesi": {
             "M_vol": 0,
@@ -184,7 +184,7 @@ CASI_DI_TEST = [
             "Prevale il limite ASSOLUTO (1 MB). Lo Z resta finito e calcolabile."
         ),
         "v_out":     80 * 1024 * 1024,
-        "v_mediano":  1 * 1024 * 1024,
+        "v_mediana":  1 * 1024 * 1024,
         "mad":       0,
         "attesi": {
             "M_vol": 1,
@@ -201,7 +201,7 @@ CASI_DI_TEST = [
             "entrambi sulla MAD reale. MAD_eff = 1 MB."
         ),
         "v_out":      100 * 1024 * 1024,
-        "v_mediano":   10 * 1024 * 1024,
+        "v_mediana":   10 * 1024 * 1024,
         "mad":        500 * 1024,         # 500 KB
         "attesi": {
             "M_vol": 1,
@@ -217,7 +217,7 @@ CASI_DI_TEST = [
             "quindi MAD_eff = MAD = 5 MB (il limite non si attiva)."
         ),
         "v_out":     100 * 1024 * 1024,
-        "v_mediano":  10 * 1024 * 1024,
+        "v_mediana":  10 * 1024 * 1024,
         "mad":         5 * 1024 * 1024,
         "attesi": {
             "M_vol": 1,
@@ -235,7 +235,7 @@ CASI_DI_TEST = [
             "Questo caso valida l'introduzione del terzo termine."
         ),
         "v_out":     80 * 1024 * 1024,
-        "v_mediano": 500 * 1024,         # 500 KB
+        "v_mediana": 500 * 1024,         # 500 KB
         "mad":        50 * 1024,         # 50 KB
         "attesi": {
             "M_vol": 1,
@@ -251,12 +251,12 @@ CASI_DI_TEST = [
         "nome": "Sotto soglia operativa - traffico statisticamente anomalo ma piccolo",
         "descrizione": (
             "Host che invia 30 MB con mediana 5 MB e MAD 1 MB. "
-            "Z robusto = 25 (significativamente anomalo) MA v_out=30 MB "
+            "Z modified = 25 (significativamente anomalo) MA v_out=30 MB "
             "non supera V_MIN_OPERATIVO=50 MB. La metrica NON deve scattare: "
             "non è una vera esfiltrazione, è solo rumore statistico."
         ),
         "v_out":     30 * 1024 * 1024,
-        "v_mediano":  5 * 1024 * 1024,
+        "v_mediana":  5 * 1024 * 1024,
         "mad":        1 * 1024 * 1024,
         "attesi": {
             "M_vol": 0,                   # bloccato dalla soglia operativa
@@ -275,7 +275,7 @@ CASI_DI_TEST = [
             "non riduzione di attività."
         ),
         "v_out":       5 * 1024 * 1024,
-        "v_mediano": 200 * 1024 * 1024,
+        "v_mediana": 200 * 1024 * 1024,
         "mad":        10 * 1024 * 1024,
         "attesi": {
             "M_vol": 0,                   # bloccato dalla direzionalità
@@ -292,7 +292,7 @@ CASI_DI_TEST = [
             "nella norma. La metrica NON deve scattare."
         ),
         "v_out":     60 * 1024 * 1024,
-        "v_mediano": 50 * 1024 * 1024,
+        "v_mediana": 50 * 1024 * 1024,
         "mad":       10 * 1024 * 1024,
         "attesi": {
             "M_vol": 0,                   # bloccato dalla soglia statistica
@@ -317,12 +317,12 @@ CASI_DI_TEST = [
         # Ma 16 MB < V_MIN_OPERATIVO. Allora scaliamo:
         # mediana=50MB, MAD=10MB, v_out = 50+30 = 80 MB
         "v_out":     80 * 1024 * 1024,
-        "v_mediano": 50 * 1024 * 1024,
+        "v_mediana": 50 * 1024 * 1024,
         "mad":       10 * 1024 * 1024,
         "attesi": {
             "M_vol": 0,                   # Z=3 non supera Z>3
             "cond_statistica": False,
-            "z_robusto": 3.0,
+            "z_modified": 3.0,
         },
     },
 
@@ -333,7 +333,7 @@ CASI_DI_TEST = [
             "(strettamente maggiore), quindi NON deve scattare."
         ),
         "v_out":     50 * 1024 * 1024,    # esattamente al limite
-        "v_mediano":  5 * 1024 * 1024,
+        "v_mediana":  5 * 1024 * 1024,
         "mad":        1 * 1024 * 1024,
         "attesi": {
             "M_vol": 0,
@@ -357,12 +357,12 @@ CASI_DI_TEST = [
             "risolto un caso rilevato in fase di validazione."
         ),
         "v_out":     100 * 1024 * 1024,
-        "v_mediano": 0,
+        "v_mediana": 0,
         "mad":       0,
         "attesi": {
             "M_vol": 1,
             "mad_eff": 1024 * 1024,       # 1 MB (limite assoluto: anche con mediana=0)
-            "z_robusto": 100.0,           # 100 MB / 1 MB = 100 (finito!)
+            "z_modified": 100.0,           # 100 MB / 1 MB = 100 (finito!)
             "cond_statistica": True,
             "cond_direzione": True,
             "cond_operativa": True,
@@ -401,7 +401,7 @@ def esegui_test(caso):
     """
     Esegue un singolo caso di test e restituisce (passed, dettagli).
     """
-    risultato = valuta_m_vol(caso["v_out"], caso["v_mediano"], caso["mad"])
+    risultato = valuta_m_vol(caso["v_out"], caso["v_mediana"], caso["mad"])
 
     fallimenti = []
     for campo, valore_atteso in caso["attesi"].items():
@@ -424,10 +424,10 @@ def stampa_risultato_test(numero, caso, passed, risultato, fallimenti):
     print(f"{stato} Test {numero}: {caso['nome']}")
     print(f"       {caso['descrizione']}")
     print(f"       Input:    v_out={formatta_byte(caso['v_out'])}, "
-          f"mediana={formatta_byte(caso['v_mediano'])}, "
+          f"mediana={formatta_byte(caso['v_mediana'])}, "
           f"MAD={formatta_byte(caso['mad'])}")
     print(f"       Calcolo:  MAD_eff={formatta_byte(risultato['mad_eff'])}, "
-          f"Z={formatta_z(risultato['z_robusto'])}")
+          f"Z={formatta_z(risultato['z_modified'])}")
     print(f"       Output:   M_vol={risultato['M_vol']}, "
           f"penalita={risultato['penalita']}")
     print(f"       Flags:    statistica={risultato['cond_statistica']}, "
@@ -450,7 +450,7 @@ def main():
     print("\n" + "=" * 75)
     print("  TEST DI LIVELLO 1 - VALIDAZIONE FORMALE DELLA FORMULA M_vol")
     print("=" * 75)
-    print(f"  Soglia Z robusto       : > {SOGLIA_Z}")
+    print(f"  Soglia Z modified       : > {SOGLIA_Z}")
     print(f"  Soglia operativa V_min : > {formatta_byte(V_MIN_OPERATIVO)}")
     print(f"  Limite MAD (frazione)   : {MAD_MIN_FRAZIONE * 100:.0f}% della mediana")
     print(f"  Numero di casi di test : {len(CASI_DI_TEST)}")

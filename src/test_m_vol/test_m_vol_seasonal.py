@@ -315,7 +315,7 @@ baseline_grezza AS (
 mediane AS (
     SELECT
         host_ip,
-        median(v_bucket) AS v_mediano,
+        median(v_bucket) AS v_mediana,
         count() AS bucket_count
     FROM baseline_grezza
     GROUP BY host_ip
@@ -325,9 +325,9 @@ mediane AS (
 statistiche_baseline AS (
     SELECT
         bg.host_ip,
-        any(m.v_mediano)    AS v_mediano,
+        any(m.v_mediana)    AS v_mediana,
         any(m.bucket_count) AS bucket_count,
-        median(abs(bg.v_bucket - m.v_mediano)) AS mad
+        median(abs(bg.v_bucket - m.v_mediana)) AS mad
     FROM baseline_grezza AS bg
     INNER JOIN mediane AS m ON bg.host_ip = m.host_ip
     GROUP BY bg.host_ip
@@ -353,23 +353,23 @@ volume_corrente AS (
 SELECT
     vc.host_ip                                              AS host_ip,
     vc.v_out                                                AS v_out,
-    sb.v_mediano                                            AS v_mediano,
+    sb.v_mediana                                            AS v_mediana,
     sb.mad                                                  AS mad,
-    greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE})     AS mad_eff,
+    greatest(sb.mad, sb.v_mediana * {MAD_MIN_FRAZIONE})     AS mad_eff,
     -- divideOrNull per gestire il caso mad_eff=0 senza crash della query
     -- (restituisce NULL invece di errore di divisione per zero)
     divideOrNull(
-        vc.v_out - sb.v_mediano,
-        greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE})
-    ) AS z_robusto,
+        vc.v_out - sb.v_mediana,
+        greatest(sb.mad, sb.v_mediana * {MAD_MIN_FRAZIONE})
+    ) AS z_modified,
     sb.bucket_count                                         AS bucket_count,
     categoria_corrente                                      AS categoria_temporale,
     -- M_vol calcolata manualmente nella SELECT (la WHERE potrebbe escludere
     -- righe con z=NULL; qui le teniamo per la diagnostica)
     if(
         vc.v_out > {V_MIN_OPERATIVO}
-        AND vc.v_out > sb.v_mediano
-        AND z_robusto > {SOGLIA_Z},
+        AND vc.v_out > sb.v_mediana
+        AND z_modified > {SOGLIA_Z},
         1, 0
     ) AS M_vol
 
@@ -403,15 +403,15 @@ def esegui_query(client, ora_simulata: datetime) -> dict:
 
     risultati = {}
     righe = client.query(sql).result_rows
-    for (host_ip, v_out, v_mediano, mad, mad_eff,
-         z_robusto, bucket_count, categoria, m_vol) in righe:
+    for (host_ip, v_out, v_mediana, mad, mad_eff,
+         z_modified, bucket_count, categoria, m_vol) in righe:
         risultati[host_ip] = {
             "v_out":      int(v_out),
-            "v_mediano":  int(v_mediano),
+            "v_mediana":  int(v_mediana),
             "mad":        float(mad),
             "mad_eff":    float(mad_eff),
-            # z_robusto può essere None (divisione per zero gestita)
-            "z_robusto":  float(z_robusto) if z_robusto is not None else None,
+            # z_modified può essere None (divisione per zero gestita)
+            "z_modified":  float(z_modified) if z_modified is not None else None,
             "bucket_count": bucket_count,
             "categoria":  categoria,
             "M_vol":      m_vol,
@@ -524,15 +524,15 @@ def verifica_run(run_config: dict, risultati: dict) -> dict:
     if run_config.get("edge_case") == "mediana_zero":
         if host_ip in risultati:
             r = risultati[host_ip]
-            # Ci aspettiamo z_robusto = None per la divisione per zero gestita
+            # Ci aspettiamo z_modified = None per la divisione per zero gestita
             # da divideOrNull, o mediana=0 e mad=0
-            if r["v_mediano"] == 0 and r["mad"] == 0 and r["mad_eff"] == 0:
+            if r["v_mediana"] == 0 and r["mad"] == 0 and r["mad_eff"] == 0:
                 return {
                     "esito": "PASS",
                     "categoria": r["categoria"],
                     "dettagli": (
                         f"Edge case correttamente rilevato:\n"
-                        f"    mediana=0, MAD=0, mad_eff=0, z_robusto={r['z_robusto']}\n"
+                        f"    mediana=0, MAD=0, mad_eff=0, z_modified={r['z_modified']}\n"
                         f"    NOTA: il modello attuale non gestisce host "
                         f"con baseline a volume zero nella categoria corrente.\n"
                         f"    RACCOMANDAZIONE: aggiungere MAD_MIN_ASSOLUTO "
@@ -545,8 +545,8 @@ def verifica_run(run_config: dict, risultati: dict) -> dict:
                     "categoria": r["categoria"],
                     "dettagli": (
                         f"Run weekend gestito senza edge case: "
-                        f"mediana={formatta_byte(r['v_mediano'])}, "
-                        f"M_vol={r['M_vol']}, Z={r['z_robusto']}."
+                        f"mediana={formatta_byte(r['v_mediana'])}, "
+                        f"M_vol={r['M_vol']}, Z={r['z_modified']}."
                     ),
                 }
         else:
@@ -596,14 +596,14 @@ def verifica_run(run_config: dict, risultati: dict) -> dict:
 
     # Z entro le aspettative?
     if "z_max_atteso" in run_config:
-        if r["z_robusto"] is None or r["z_robusto"] > run_config["z_max_atteso"]:
+        if r["z_modified"] is None or r["z_modified"] > run_config["z_max_atteso"]:
             problemi.append(
-                f"Z={r['z_robusto']} non <= {run_config['z_max_atteso']}"
+                f"Z={r['z_modified']} non <= {run_config['z_max_atteso']}"
             )
     if "z_min_atteso" in run_config:
-        if r["z_robusto"] is None or r["z_robusto"] <= run_config["z_min_atteso"]:
+        if r["z_modified"] is None or r["z_modified"] <= run_config["z_min_atteso"]:
             problemi.append(
-                f"Z={r['z_robusto']} non > {run_config['z_min_atteso']}"
+                f"Z={r['z_modified']} non > {run_config['z_min_atteso']}"
             )
 
     if problemi:
@@ -613,14 +613,14 @@ def verifica_run(run_config: dict, risultati: dict) -> dict:
             "dettagli": "; ".join(problemi),
         }
     else:
-        z_str = f"{r['z_robusto']:.2f}" if r["z_robusto"] is not None else "N/A"
+        z_str = f"{r['z_modified']:.2f}" if r["z_modified"] is not None else "N/A"
         return {
             "esito": "PASS",
             "categoria": r["categoria"],
             "dettagli": (
                 f"Rilevato correttamente: "
                 f"v_out={formatta_byte(r['v_out'])}, "
-                f"mediana={formatta_byte(r['v_mediano'])}, "
+                f"mediana={formatta_byte(r['v_mediana'])}, "
                 f"MAD_eff={formatta_byte(r['mad_eff'])}, "
                 f"Z={z_str}, M_vol={r['M_vol']}, "
                 f"bucket_baseline={r['bucket_count']}"
@@ -641,14 +641,14 @@ def stampa_risultato_run(run_config: dict, risultati: dict, esito: dict):
 
     if HOST_E_IP in risultati:
         r = risultati[HOST_E_IP]
-        z_str = f"{r['z_robusto']:.2f}" if r["z_robusto"] is not None else "NULL (div/0)"
+        z_str = f"{r['z_modified']:.2f}" if r["z_modified"] is not None else "NULL (div/0)"
         print(f"  RISULTATI QUERY per {HOST_E_IP}:")
         print(f"    categoria       : {r['categoria']}")
         print(f"    v_out           : {formatta_byte(r['v_out'])}")
-        print(f"    v_mediano       : {formatta_byte(r['v_mediano'])}")
+        print(f"    v_mediana       : {formatta_byte(r['v_mediana'])}")
         print(f"    MAD (grezza)    : {formatta_byte(r['mad'])}")
         print(f"    MAD effettiva   : {formatta_byte(r['mad_eff'])}")
-        print(f"    Z robusto       : {z_str}")
+        print(f"    Z modified      : {z_str}")
         print(f"    bucket_baseline : {r['bucket_count']}")
         print(f"    M_vol           : {r['M_vol']} (penalita={r['penalita']})")
     else:
