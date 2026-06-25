@@ -276,7 +276,7 @@ def stampa_indice_rete(indice: dict):
 
 def stampa_tabella_host(aggregato: dict):
     """
-    Tabella riassuntiva degli host SOSPETTI (zona Giallo/Rosso), ordinati
+    Tabella riassuntiva degli host SOSPETTI (zona Giallo/Rossa), ordinati
     per score decrescente. Gli host in zona Verde vengono volutamente esclusi:
     sono tipicamente flaggati solo da metriche a basso peso (es. M_vol, +20)
     che da sole non superano la soglia di allerta, quindi affollerebbero la
@@ -301,7 +301,7 @@ def stampa_tabella_host(aggregato: dict):
 
     print()
     print("=" * 75)
-    print("  TABELLA HOST SOSPETTI (zona Giallo/Rosso, ordinati per score)")
+    print("  TABELLA HOST SOSPETTI (zona Giallo/Rossa, ordinati per score)")
     print("=" * 75)
     print(f"  {'Host':<18} {'Score':>5}  {'Fascia':<7}  Metriche attive")
     print(f"  {'-'*18} {'-'*5}  {'-'*7}  {'-'*32}")
@@ -328,7 +328,7 @@ def stampa_dettaglio_host_critici(aggregato: dict):
 
     print()
     print("=" * 75)
-    print("  DETTAGLIO HOST CRITICI (fascia giallo e rosso)")
+    print("  DETTAGLIO HOST CRITICI (fascia gialla e rossa)")
     print("=" * 75)
 
     # Stampo dal più critico al meno critico

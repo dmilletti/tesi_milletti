@@ -166,13 +166,13 @@ baseline_grezza AS (
 -- della baseline filtrata. Applica il filtro cold start; host con
 -- meno di 30 bucket validi non hanno baseline statisticamente affidabile
 -- e vengono esclusi dal calcolo.
--- Restituisce una tabella con host_ip, v_mediano, bucket_count.
+-- Restituisce una tabella con host_ip, v_mediana, bucket_count.
 -- =============================================================
 mediane AS (
     SELECT
         host_ip,
         -- Calcolo della mediana dei volumi orari (v_bucket) per ogni host
-        median(v_bucket) AS v_mediano,
+        median(v_bucket) AS v_mediana,
         -- Conteggio dei bucket orari validi per ogni host
         count() AS bucket_count
     FROM baseline_grezza
@@ -184,21 +184,21 @@ mediane AS (
 -- =============================================================
 -- CTE 4: statistiche_baseline
 -- Per ogni host con baseline valida, calcola la MAD.
--- MAD = median( |v_bucket - v_mediano| ), quindi serve un JOIN con
+-- MAD = median( |v_bucket - v_mediana| ), quindi serve un JOIN con
 -- la CTE precedente per avere la mediana disponibile.
 -- ClickHouse non ha una funzione MAD nativa quindi si calcola come mediana
 -- delle distanze assolute, in una seconda passata.
--- Restituisce una tabella con host_ip, v_mediano, bucket_count, mad.
+-- Restituisce una tabella con host_ip, v_mediana, bucket_count, mad.
 -- =============================================================
 
 statistiche_baseline AS (
     SELECT
         bg.host_ip,
-        -- Prendo una qualsiasi riga per host da mediane, tanto v_mediano e bucket_count
+        -- Prendo una qualsiasi riga per host da mediane, tanto v_mediana e bucket_count
         -- sono costanti per host_ip (grazie al GROUP BY), quindi non importa quale prendo.
-        any(m.v_mediano)   AS v_mediano,
+        any(m.v_mediana)   AS v_mediana,
         any(m.bucket_count) AS bucket_count,
-        median(abs(bg.v_bucket - m.v_mediano)) AS mad
+        median(abs(bg.v_bucket - m.v_mediana)) AS mad
     FROM baseline_grezza AS bg
     INNER JOIN mediane AS m ON bg.host_ip = m.host_ip
     GROUP BY bg.host_ip
@@ -240,18 +240,18 @@ volume_corrente AS (
 SELECT
     vc.host_ip AS host_ip,
     vc.v_out AS v_out,
-    sb.v_mediano AS v_mediano,
+    sb.v_mediana AS v_mediana,
     sb.mad AS mad,
 
     -- Calcolo della MAD effettiva, per evitare div/0
     -- greatest(a, b) = max(a, b) in ClickHouse
-    greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS mad_eff,
+    greatest(sb.mad, sb.v_mediana * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS mad_eff,
 
     -- Z modified direzionale: senza valore assoluto.
     -- Valori positivi -> traffico sopra mediana (potenziale esfiltrazione)
     -- Valori negativi -> traffico sotto mediana (host inattivo, non interessa)
-    (vc.v_out - sb.v_mediano)
-        / greatest(sb.mad, sb.v_mediano * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS z_modified,
+    (vc.v_out - sb.v_mediana)
+        / greatest(sb.mad, sb.v_mediana * {MAD_MIN_FRAZIONE}, {MAD_MIN_ASSOLUTO}) AS z_modified,
 
     sb.bucket_count AS bucket_count,
     categoria_corrente AS categoria_temporale,
@@ -268,7 +268,7 @@ WHERE
     vc.v_out > {V_MIN_OPERATIVO}
 
     -- Condizione 2: direzionalità (solo scostamenti in eccesso)
-    AND vc.v_out > sb.v_mediano
+    AND vc.v_out > sb.v_mediana
 
     -- Condizione 1: significatività statistica
     AND z_modified > {SOGLIA_Z}
@@ -294,7 +294,7 @@ def calcola_m_vol(client):
         "192.168.1.45": {
             "M_vol":                1,
             "v_out":                78_643_200,     # byte nell'ora corrente
-            "v_mediano":            12_582_912,     # mediana baseline contestuale
+            "v_mediana":            12_582_912,     # mediana baseline contestuale
             "mad":                  3_145_728,      # MAD grezza
             "mad_eff":              3_145_728,      # MAD effettiva
             "z_modified":           21.0,           # Z-score effettivo
@@ -312,15 +312,15 @@ def calcola_m_vol(client):
     righe = client.query(QUERY_M_VOL).result_rows
 
     # Ogni riga contiene:
-    # (host_ip, v_out, v_mediano, mad, mad_eff,
+    # (host_ip, v_out, v_mediana, mad, mad_eff,
     #  z_modified, bucket_count, categoria_temporale, M_vol)
-    for (host_ip, v_out, v_mediano, mad, mad_eff,
+    for (host_ip, v_out, v_mediana, mad, mad_eff,
          z_modified, bucket_count, categoria_temporale, m_vol) in righe:
 
         risultati[host_ip] = {
             "M_vol":               m_vol,
             "v_out":               int(v_out),
-            "v_mediano":           int(v_mediano),
+            "v_mediana":           int(v_mediana),
             "mad":                 int(mad),
             "mad_eff":             int(mad_eff),
             "z_modified":          float(z_modified),
@@ -360,7 +360,7 @@ def stampa_report(host_ip: str, dati: dict):
     print(f"  Categoria temporale : {dati['categoria_temporale']}")
     print(f"  Bucket baseline     : {dati['bucket_baseline']}")
     print(f"  V_out (ora attuale) : {formatta_byte(dati['v_out'])}")
-    print(f"  V_mediano (baseline): {formatta_byte(dati['v_mediano'])}")
+    print(f"  V_mediana (baseline): {formatta_byte(dati['v_mediana'])}")
     print(f"  MAD (grezza)        : {formatta_byte(dati['mad'])}")
     print(f"  MAD effettiva       : {formatta_byte(dati['mad_eff'])}")
     print(f"  Z modified           : {dati['z_modified']:.2f}")

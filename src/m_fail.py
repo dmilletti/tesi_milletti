@@ -32,7 +32,7 @@ Logica:
       1. Conta i flussi totali e i flussi falliti dell'ultima ora
          -> r_t = n_falliti / n_totali (rate corrente)
       2. Recupera la baseline contestuale (stessa categoria oraria,
-         ultimi 7 giorni) -> r_mediano, MAD
+         ultimi 7 giorni) -> r_mediana, MAD
       3. Calcola lo Modified z-score  con il limite sulla MAD
       4. Applica le 5 condizioni di scatto in AND.
 
@@ -74,12 +74,12 @@ Formula matematica:
 
     Lo Z-score modiefied:
 
-        Z = (r_t - r_mediano) / MAD_eff
+        Z = (r_t - r_mediana) / MAD_eff
 
     La metrica scatta se sono soddisfatte simultaneamente:
 
         M_fail = 1  <=>  Z > 3 -> oscillazione statisticamente significativa
-                  AND  r_t > r_mediano -> ci interessa solo l'aumento, non la diminuzione
+                  AND  r_t > r_mediana -> ci interessa solo l'aumento, non la diminuzione
                   AND  r_t > R_MIN_OPERATIVO -> tasso fallimento maggiore del 30% in valore assoluto
                   AND  n_flussi_correnti >= MIN_FLUSSI_CORRENTE -> soglia minima di flussi
                   AND  bucket_baseline >= MIN_BASELINE_HOURS -> almeno 30 ore di dati registrati
@@ -271,13 +271,13 @@ flussi_storici AS (
 -- della baseline filtrata. Applica il filtro cold start; host con
 -- meno di 30 bucket validi non hanno baseline statisticamente affidabile
 -- e vengono esclusi dal calcolo.
--- Restituisce una tabella con host_ip, r_mediano, bucket_count.
+-- Restituisce una tabella con host_ip, r_mediana, bucket_count.
 -- =============================================================
 
 mediane AS (
     SELECT
         host_ip,
-        median(rate_bucket) AS r_mediano,
+        median(rate_bucket) AS r_mediana,
         count()             AS bucket_count
     FROM flussi_storici
     GROUP BY host_ip
@@ -287,17 +287,17 @@ mediane AS (
 -- =============================================================
 -- CTE 3: aggiunta della MAD alla baseline
 -- La MAD è la mediana della distanza assoluta dalla mediana.
--- Si calcola facendo la JOIN fra flussi_storici e mediane (per avere r_mediano riga
--- per riga) e applicando median(abs(rate_bucket - r_mediano)).
+-- Si calcola facendo la JOIN fra flussi_storici e mediane (per avere r_mediana riga
+-- per riga) e applicando median(abs(rate_bucket - r_mediana)).
 -- =============================================================
 statistiche_baseline AS (
     SELECT
         fs.host_ip,
-        -- Prendo una qualsiasi riga per host da mediane, tanto r_mediano e bucket_count
+        -- Prendo una qualsiasi riga per host da mediane, tanto r_mediana e bucket_count
         -- sono costanti per host_ip (grazie al GROUP BY), quindi non importa quale prendo.
-        any(m.r_mediano)                          AS r_mediano,
+        any(m.r_mediana)                          AS r_mediana,
         any(m.bucket_count)                       AS bucket_count,
-        median(abs(fs.rate_bucket - m.r_mediano)) AS mad
+        median(abs(fs.rate_bucket - m.r_mediana)) AS mad
     FROM flussi_storici AS fs
     INNER JOIN mediane AS m ON fs.host_ip = m.host_ip
     GROUP BY fs.host_ip
@@ -360,12 +360,12 @@ SELECT
     fc.n_flussi_falliti AS n_falliti,
     fc.r_corrente AS r_corrente,
 
-    sb.r_mediano AS r_mediano,
+    sb.r_mediana AS r_mediana,
     sb.mad AS mad,
     greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS mad_eff,
 
     -- Modified z-score senza valore assoluto (vogliamo solo aumenti)
-    (fc.r_corrente - sb.r_mediano)
+    (fc.r_corrente - sb.r_mediana)
         / greatest(sb.mad, {MAD_MIN_ASSOLUTA}) AS z_modified,
 
     sb.bucket_count AS bucket_count,
@@ -387,7 +387,7 @@ WHERE
     -- Tripla condizione di scatto (le altre due, MIN_FLUSSI_CORRENTE e
     -- MIN_BASELINE_HOURS, sono già state applicate come HAVING nei CTE (4 e 2) flussi_correnti e mediane)
     fc.r_corrente > {R_MIN_OPERATIVO}
-    AND fc.r_corrente > sb.r_mediano
+    AND fc.r_corrente > sb.r_mediana
     AND z_modified > {SOGLIA_Z}
 
 ORDER BY z_modified DESC
@@ -412,7 +412,7 @@ def calcola_m_fail(client):
             "n_totali":            312,    <- flussi totali dell'ora
             "n_falliti":           287,    <- flussi falliti
             "r_corrente":          0.92,   <- rate corrente (92%)
-            "r_mediano":           0.018,  <- rate mediano storico (1.8%)
+            "r_mediana":           0.018,  <- rate mediana storica (1.8%)
             "mad":                 0.012,  <- MAD reale
             "mad_eff":             0.05,   <- MAD effettiva (limite attivo)
             "z_modified":          18.04,  <- Modified z-score
@@ -438,13 +438,13 @@ def calcola_m_fail(client):
 
     # Ogni riga contiene (in ordine):
     # host_ip, n_totali, n_falliti, r_corrente,
-    # r_mediano, mad, mad_eff, z_modified,
+    # r_mediana, mad, mad_eff, z_modified,
     # bucket_count, categoria_temporale,
     # n_dst2src_zero, n_error_code, n_unidirectional,
     # n_tcp_issues, n_unresolved, n_probing,
     # M_fail
     for (host_ip, n_totali, n_falliti, r_corrente,
-         r_mediano, mad, mad_eff, z_modified,
+         r_mediana, mad, mad_eff, z_modified,
          bucket_count, categoria_temporale,
          n_dst2src_zero, n_error_code, n_unidirectional,
          n_tcp_issues, n_unresolved, n_probing,
@@ -455,7 +455,7 @@ def calcola_m_fail(client):
             "n_totali":            n_totali,
             "n_falliti":           n_falliti,
             "r_corrente":          float(r_corrente),
-            "r_mediano":           float(r_mediano),
+            "r_mediana":           float(r_mediana),
             "mad":                 float(mad),
             "mad_eff":             float(mad_eff),
             "z_modified":          float(z_modified),
@@ -511,7 +511,7 @@ def stampa_report(host_ip: str, dati: dict):
     print(f"  Flussi totali (ora)   : {dati['n_totali']}")
     print(f"  Flussi falliti (ora)  : {dati['n_falliti']}")
     print(f"  Rate corrente         : {dati['r_corrente']*100:6.2f}%")
-    print(f"  Rate mediano storico  : {dati['r_mediano']*100:6.2f}%")
+    print(f"  Rate mediana storica  : {dati['r_mediana']*100:6.2f}%")
     print(f"  MAD reale             : {dati['mad']*100:6.2f}%")
     print(f"  MAD effettiva (floor) : {dati['mad_eff']*100:6.2f}%")
     print(f"  Modified z-score       : {dati['z_modified']:6.2f}")

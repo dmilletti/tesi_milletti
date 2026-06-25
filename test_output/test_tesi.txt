@@ -77,10 +77,10 @@
          lista_mismatch        : ['TLS su porta 8443']
     > M_vol    (+20 punti)
          v_out                 : 943970233
-         v_mediano             : 168265175
+         v_mediana             : 168265175
          mad                   : 45152268
          mad_eff               : 45152268
-         z_robusto             : 17.1798
+         z_modified             : 17.1798
          categoria_temporale   : feriale_lavorativo
          bucket_baseline       : 42
 
@@ -279,10 +279,10 @@
          n_totali              : 16152
          n_falliti             : 11440
          r_corrente            : 0.7083
-         r_mediano             : 0.1539
+         r_mediana             : 0.1539
          mad                   : 0.0467
          mad_eff               : 0.0500
-         z_robusto             : 11.0881
+         z_modified             : 11.0881
          bucket_count          : 42
          categoria_temporale   : feriale_lavorativo
          breakdown:
@@ -355,10 +355,10 @@
          lista_mismatch        : ['SMTPS su porta 587']
     > M_vol    (+20 punti)
          v_out                 : 4091592697
-         v_mediano             : 9245604
+         v_mediana             : 9245604
          mad                   : 4359368
          mad_eff               : 4359368
-         z_robusto             : 936.4539
+         z_modified             : 936.4539
          categoria_temporale   : feriale_lavorativo
          bucket_baseline       : 42
 
