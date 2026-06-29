@@ -1,0 +1,63 @@
+(venv) diego@diego-Zenbook-UX3402ZA-UX3402ZA:~/Progetti/tesi_milletti/src$ python scoring.py 
+===========================================================================
+  SISTEMA DI RILEVAMENTO ANOMALIE - SCORING ORARIO
+  Esecuzione: 2026-06-29 16:03:07 UTC
+  Metriche attive: 8
+===========================================================================
+
+[setup] Connessione a ClickHouse... OK
+
+[fase 1] Esecuzione delle metriche di rilevamento
+
+  [run] M_rep    (Destination reputation)... OK (0 host flaggati)
+  [run] M_cert   (TLS certificate anomalies)... OK (1 host flaggati)
+  [run] M_sni    (SNI evasion)... OK (0 host flaggati)
+  [run] M_srv    (Server port detected)... OK (0 host flaggati)
+  [run] M_proto  (Non-standard port/protocol)... OK (0 host flaggati)
+  [run] M_scan   (Network discovery)... OK (0 host flaggati)
+  [run] M_vol    (Asimmetria volumetrica)... OK (0 host flaggati)
+  [run] M_fail   (Connection failure rate)... OK (0 host flaggati)
+
+[fase 2] Aggregazione dei risultati per host
+  Host unici flaggati da almeno una metrica: 1
+
+===========================================================================
+  [fase 3] STATO DELLA RETE
+===========================================================================
+  Host osservati con almeno 1 metrica attiva : 1
+
+  Distribuzione per fascia:
+    Verde   (0-29)  :   0
+    Giallo  (30-59) :   1
+    Rosso   (60-100):   0
+
+  Score massimo della rete : 40
+  Fascia globale           : [ !] GIALLO
+
+  >> RETE IN OSSERVAZIONE: almeno un host mostra comportamenti
+     anomali. è opportuno monitorare l'evoluzione nelle
+     prossime ore.
+
+===========================================================================
+  TABELLA HOST SOSPETTI (zona Giallo/Rossa, ordinati per score)
+===========================================================================
+  Host               Score  Fascia   Metriche attive
+  ------------------ -----  -------  --------------------------------
+  10.7.14.101           40  [ !] GIALLO M_cert
+
+===========================================================================
+  DETTAGLIO HOST CRITICI (fascia gialla e rossa)
+===========================================================================
+
+---------------------------------------------------------------------------
+  [ !] HOST 10.7.14.101  ->  Score: 40/100  (GIALLO)
+---------------------------------------------------------------------------
+    > M_cert   (+40 punti)
+         hits_self_signed      : 18
+         hits_sha1             : 0
+         hits_totali           : 18
+
+===========================================================================
+  FINE ESECUZIONE
+===========================================================================
+
