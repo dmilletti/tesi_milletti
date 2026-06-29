@@ -45,7 +45,7 @@ import argparse
 from datetime import datetime, timezone
 
 from readconfig import (
-    connetti_clickhouse, costruisci_filtro_lan,
+    connetti_clickhouse, costruisci_filtro_lan, espr_riferimento,
     PESO_M_SNI, FINESTRA_MINUTI_DEFAULT,
     M_SNI_BIT_NDPI_MISSING_SNI as BIT_NDPI_MISSING_SNI,
 )
@@ -110,6 +110,7 @@ def calcola_m_sni(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     # limita l'analisi ai soli host della LAN interna (RFC 1918) sulla colonna
     # cli_ip, che è il "soggetto" del flusso (il client che fa TLS senza SNI).
     filtro_lan = costruisci_filtro_lan("cli_ip")
+    rif = espr_riferimento()
 
     query = f"""
     SELECT
@@ -124,7 +125,8 @@ def calcola_m_sni(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     FROM flow_alerts_view
     WHERE
         -- Finestra temporale parametrica (default 60 minuti)
-        tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+        tstamp >= {rif} - INTERVAL {finestra_minuti} MINUTE
+        AND tstamp < {rif}
 
         -- Filtro LAN interna: valutiamo solo host della rete monitorata
         AND {filtro_lan}

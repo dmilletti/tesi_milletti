@@ -116,7 +116,7 @@ Soglie di rischio dello score finale S(h):
 
 from datetime import datetime, timezone
 from readconfig import (
-    connetti_clickhouse, costruisci_filtro_lan, costruisci_filtro_esterno,
+    connetti_clickhouse, costruisci_filtro_lan, costruisci_filtro_esterno, espr_riferimento,
     PESO_M_FAIL,
     M_FAIL_SOGLIA_Z as SOGLIA_Z,
     M_FAIL_R_MIN_OPERATIVO as R_MIN_OPERATIVO,
@@ -182,6 +182,8 @@ FILTRO_LAN_SRC = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
 
 FILTRO_EXT_DST = costruisci_filtro_esterno("IPv4NumToString(IPV4_DST_ADDR)")
 
+RIF = espr_riferimento()
+
 QUERY_M_FAIL = f"""
 -- =============================================================
 -- CTE 0: categoria_corrente
@@ -193,10 +195,10 @@ QUERY_M_FAIL = f"""
 WITH (
     SELECT multiIf(
         -- Siamo nel weekend?
-        toDayOfWeek(now()) IN ({GIORNI_WEEKEND[0]}, {GIORNI_WEEKEND[1]}),
+        toDayOfWeek({RIF}) IN ({GIORNI_WEEKEND[0]}, {GIORNI_WEEKEND[1]}),
             'weekend',
         -- Siamo in un'ora lavorativa dei feriali?
-        toHour(now()) BETWEEN {ORE_LAVORATIVE[0]} AND {ORE_LAVORATIVE[1]},
+        toHour({RIF}) BETWEEN {ORE_LAVORATIVE[0]} AND {ORE_LAVORATIVE[1]},
             'feriale_lavorativo',
         -- Altrimenti, siamo in un'ora non lavorativa dei feriali
             'feriale_fuoriorario'
@@ -234,9 +236,9 @@ flussi_storici AS (
     FROM flows
     WHERE
         -- Finestra storica di 7 giorni
-        FIRST_SEEN >= now() - INTERVAL {FINESTRA_STORICO_GIORNI} DAY
+        FIRST_SEEN >= {RIF} - INTERVAL {FINESTRA_STORICO_GIORNI} DAY
         -- Escludo l'ora corrente
-        AND FIRST_SEEN <  now() - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
+        AND FIRST_SEEN <  {RIF} - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
 
         -- Esclude flussi IPv6 puri (IPV4_SRC_ADDR = 0)
         AND IPV4_SRC_ADDR != 0
@@ -333,7 +335,8 @@ flussi_correnti AS (
 
     FROM flows
     WHERE
-        FIRST_SEEN >= now() - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
+        FIRST_SEEN >= {RIF} - INTERVAL {FINESTRA_CORRENTE_ORE} HOUR
+        AND FIRST_SEEN <  {RIF}
 
         AND IPV4_SRC_ADDR != 0
         

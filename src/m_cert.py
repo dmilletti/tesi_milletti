@@ -32,8 +32,8 @@ Fonte dei dati:
 
 Mappa dei bit nDPI usati (verificata su nDPI, vedere risk_info nel JSON):
     bit 6  -> NDPI_TLS_SELFSIGNED_CERTIFICATE   ("Self-signed Cert")
-    bit 9  -> NDPI_TLS_CERTIFICATE_EXPIRED      ("TLS Cert Expired")
-    bit 10 -> NDPI_TLS_CERTIFICATE_MISMATCH     ("TLS Cert Mismatch")
+    bit 9  -> NDPI_TLS_CERTIFICATE_EXPIRED      ("TLS Cert Expired") -> da disattivare durante i test con pcap per falsi positivi (cert scaduti ma ancora validi)
+    bit 10 -> NDPI_TLS_CERTIFICATE_MISMATCH     ("TLS Cert Mismatch") -> eliminato per falsi positivi
     bit 29 -> NDPI_MALICIOUS_SHA1_CERTIFICATE   ("Malicious SHA1 Cert")
 
 Soglie di rischio dello score finale S(h):
@@ -46,7 +46,7 @@ Soglie di rischio dello score finale S(h):
 import argparse
 from datetime import datetime, timezone
 from readconfig import (
-    connetti_clickhouse, costruisci_filtro_lan,
+    connetti_clickhouse, costruisci_filtro_lan, espr_riferimento,
     PESO_M_CERT, FINESTRA_MINUTI_DEFAULT,
 )
 
@@ -103,8 +103,7 @@ def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
         "192.168.1.45": {
             "M_cert":            1,
             "hits_self_signed":  1,   <- cert auto-firmati contattati
-            "hits_expired":      2,   <- cert scaduti contattati
-            "hits_mismatch":     0,   <- cert con dominio non corrispondente
+            "hits_expired":      2,   <- cert scaduti contattati -> da disattivare durante i test con pcap per falsi positivi
             "hits_sha1":         0,   <- cert con SHA1 (debole)
             "hits_totali":       3,
             "penalita":         40,   <- punti da sommare allo score
@@ -122,6 +121,7 @@ def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     #  limita l'analisi ai soli host della LAN interna (RFC 1918) sulla colonna
     #  cli_ip, che è il "soggetto" del flusso.
     filtro_lan = costruisci_filtro_lan("cli_ip")
+    rif = espr_riferimento()  # now() o toDateTime(epoch) per replay
 
     query = f"""
     SELECT
@@ -129,20 +129,20 @@ def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
 
         -- Conteggio per ogni tipo di anomalia di certificato
         countIf(bitTest(flow_risk_bitmap, 6)  = 1) AS hits_self_signed,
-        countIf(bitTest(flow_risk_bitmap, 9)  = 1) AS hits_expired,
-        countIf(bitTest(flow_risk_bitmap, 10) = 1) AS hits_mismatch,
+        -- countIf(bitTest(flow_risk_bitmap, 9)  = 1) AS hits_expired,
         countIf(bitTest(flow_risk_bitmap, 29) = 1) AS hits_sha1,
 
-        -- Hit totali su qualsiasi bit di certificato
-        hits_self_signed + hits_expired + hits_mismatch + hits_sha1 AS hits_totali,
+        -- Hit totali su qualsiasi bit di certificato + hits_expired
+        hits_self_signed + hits_sha1 AS hits_totali,
 
         -- Se condizione è vera (hits_totali > 0), restituisce 1; altrimenti 0
         if(hits_totali > 0, 1, 0) AS M_cert
 
     FROM flow_alerts_view
     WHERE
-        -- Finestra temporale parametrica (default 60 minuti)
-        tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+        -- Finestra temporale
+        tstamp >= {rif} - INTERVAL {finestra_minuti} MINUTE
+        AND tstamp < {rif}
 
         -- Filtro LAN interna: classifichiamo solo host della rete monitorata
         AND {filtro_lan}
@@ -152,8 +152,7 @@ def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
         -- per scartare subito tutti gli altri flussi.
         AND (
             bitTest(flow_risk_bitmap, 6)  = 1
-            OR bitTest(flow_risk_bitmap, 9)  = 1
-            OR bitTest(flow_risk_bitmap, 10) = 1
+            -- OR bitTest(flow_risk_bitmap, 9)  = 1
             OR bitTest(flow_risk_bitmap, 29) = 1
         )
 
@@ -172,16 +171,15 @@ def calcola_m_cert(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     righe = client.query(query).result_rows
 
     # Ogni riga contiene:
-    # (host_ip, hits_self_signed, hits_expired, hits_mismatch,
+    # (host_ip, hits_self_signed, hits_expired,
     #  hits_sha1, hits_totali, M_cert)
-    for (host_ip, hits_self_signed, hits_expired, hits_mismatch,
+    for (host_ip, hits_self_signed, #hits_expired,
          hits_sha1, hits_totali, m_cert) in righe:
 
         risultati[host_ip] = {
             "M_cert":           m_cert,
             "hits_self_signed": hits_self_signed,
-            "hits_expired":     hits_expired,
-            "hits_mismatch":    hits_mismatch,
+            #"hits_expired":     hits_expired,
             "hits_sha1":        hits_sha1,
             "hits_totali":      hits_totali,
             "penalita":         PESO_M_CERT * m_cert,  # 40 se M_cert=1, 0 altrimenti
@@ -204,8 +202,7 @@ def stampa_report(host_ip: str, dati: dict):
     print(f"  Timestamp           : {dati['timestamp']}")
     print(f"  M_cert              : {dati['M_cert']} (attiva)")
     print(f"  Hit self-signed     : {dati['hits_self_signed']}")
-    print(f"  Hit expired         : {dati['hits_expired']}")
-    print(f"  Hit mismatch        : {dati['hits_mismatch']}")
+    #print(f"  Hit expired         : {dati['hits_expired']}")
     print(f"  Hit SHA1 weak       : {dati['hits_sha1']}")
     print(f"  Hit totali          : {dati['hits_totali']}")
     print(f"  Penalità M_cert     : +{dati['penalita']} punti")

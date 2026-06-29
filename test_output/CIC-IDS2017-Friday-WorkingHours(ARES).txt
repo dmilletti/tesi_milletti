@@ -1,7 +1,7 @@
 (venv) diego@diego-Zenbook-UX3402ZA-UX3402ZA:~/Progetti/tesi_milletti/src$ python scoring.py 
 ===========================================================================
   SISTEMA DI RILEVAMENTO ANOMALIE - SCORING ORARIO
-  Esecuzione: 2026-06-23 09:08:49 UTC
+  Esecuzione: 2026-06-27 16:44:46 UTC
   Metriche attive: 8
 ===========================================================================
 
@@ -10,61 +10,61 @@
 [fase 1] Esecuzione delle metriche di rilevamento
 
   [run] M_rep    (Destination reputation)... OK (0 host flaggati)
-  [run] M_cert   (TLS certificate anomalies)... OK (0 host flaggati)
+  [run] M_cert   (TLS certificate anomalies)... OK (2 host flaggati)
   [run] M_sni    (SNI evasion)... OK (0 host flaggati)
-  [run] M_srv    (Server role detection)... OK (9 host flaggati)
-  [run] M_proto  (Non-standard port/protocol)... OK (0 host flaggati)
+  [run] M_srv    (Server port detected)... OK (0 host flaggati)
+  [run] M_proto  (Non-standard port/protocol)... OK (10 host flaggati)
   [run] M_scan   (Network discovery)... OK (6 host flaggati)
   [run] M_vol    (Asimmetria volumetrica)... OK (0 host flaggati)
   [run] M_fail   (Connection failure rate)... OK (0 host flaggati)
 
 [fase 2] Aggregazione dei risultati per host
-  Host unici flaggati da almeno una metrica: 11
+  Host unici flaggati da almeno una metrica: 12
 
 ===========================================================================
   [fase 3] STATO DELLA RETE
 ===========================================================================
-  Host osservati con almeno 1 metrica attiva : 11
+  Host osservati con almeno 1 metrica attiva : 12
 
   Distribuzione per fascia:
-    Verde   (0-29)  :   0
-    Giallo  (30-59) :   7
-    Rosso   (60-100):   4
+    Verde   (0-29)  :   6
+    Giallo  (30-59) :   1
+    Rosso   (60-100):   5
 
-  Score massimo della rete : 70
+  Score massimo della rete : 100
   Fascia globale           : [!!] ROSSO
 
   >> RETE COMPROMESSA: almeno un host ha superato la soglia
      di intervento. è richiesta verifica immediata.
 
 ===========================================================================
-  TABELLA HOST SOSPETTI (zona Giallo/Rosso, ordinati per score)
+  TABELLA HOST SOSPETTI (zona Giallo/Rossa, ordinati per score)
 ===========================================================================
   Host               Score  Fascia   Metriche attive
   ------------------ -----  -------  --------------------------------
-  192.168.10.9          70  [!!] ROSSO  M_srv, M_scan
-  192.168.10.5          70  [!!] ROSSO  M_srv, M_scan
-  192.168.10.15         70  [!!] ROSSO  M_srv, M_scan
-  192.168.10.14         70  [!!] ROSSO  M_srv, M_scan
-  192.168.10.8          40  [ !] GIALLO M_scan
+  192.168.10.14        100  [!!] ROSSO  M_cert, M_proto, M_scan
+  192.168.10.15         80  [!!] ROSSO  M_cert, M_scan
+  192.168.10.9          65  [!!] ROSSO  M_proto, M_scan
+  192.168.10.8          65  [!!] ROSSO  M_proto, M_scan
+  192.168.10.5          65  [!!] ROSSO  M_proto, M_scan
   172.16.0.1            40  [ !] GIALLO M_scan
-  192.168.10.50         30  [ !] GIALLO M_srv
-  192.168.10.51         30  [ !] GIALLO M_srv
-  192.168.10.16         30  [ !] GIALLO M_srv
-  192.168.10.25         30  [ !] GIALLO M_srv
-  192.168.10.3          30  [ !] GIALLO M_srv
 
 ===========================================================================
-  DETTAGLIO HOST CRITICI (fascia giallo e rosso)
+  DETTAGLIO HOST CRITICI (fascia gialla e rossa)
 ===========================================================================
 
 ---------------------------------------------------------------------------
-  [!!] HOST 192.168.10.9  ->  Score: 70/100  (ROSSO)
+  [!!] HOST 192.168.10.14  ->  Score: 100/100  (ROSSO)
+      (penalità grezza pre-saturazione: 105)
 ---------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
+    > M_cert   (+40 punti)
+         hits_self_signed      : 2
+         hits_sha1             : 0
+         hits_totali           : 2
+    > M_proto  (+25 punti)
+         hits_totali           : 6
+         combinazioni_distinte : 2
+         lista_mismatch        : ['DCERPC su porta 49666', 'DCERPC su porta 49671']
     > M_scan   (+40 punti)
          hits_totali           : 1
          codici_rilevati       : [2]
@@ -72,12 +72,12 @@
          categoria_dominante   : SYN SCAN CLASSICO
 
 ---------------------------------------------------------------------------
-  [!!] HOST 192.168.10.5  ->  Score: 70/100  (ROSSO)
+  [!!] HOST 192.168.10.15  ->  Score: 80/100  (ROSSO)
 ---------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
+    > M_cert   (+40 punti)
+         hits_self_signed      : 2
+         hits_sha1             : 0
+         hits_totali           : 2
     > M_scan   (+40 punti)
          hits_totali           : 1
          codici_rilevati       : [2]
@@ -85,12 +85,12 @@
          categoria_dominante   : SYN SCAN CLASSICO
 
 ---------------------------------------------------------------------------
-  [!!] HOST 192.168.10.15  ->  Score: 70/100  (ROSSO)
+  [!!] HOST 192.168.10.9  ->  Score: 65/100  (ROSSO)
 ---------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
+    > M_proto  (+25 punti)
+         hits_totali           : 8
+         combinazioni_distinte : 2
+         lista_mismatch        : ['DCERPC su porta 49666', 'DCERPC su porta 49671']
     > M_scan   (+40 punti)
          hits_totali           : 1
          codici_rilevati       : [2]
@@ -98,12 +98,12 @@
          categoria_dominante   : SYN SCAN CLASSICO
 
 ---------------------------------------------------------------------------
-  [!!] HOST 192.168.10.14  ->  Score: 70/100  (ROSSO)
+  [!!] HOST 192.168.10.8  ->  Score: 65/100  (ROSSO)
 ---------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
+    > M_proto  (+25 punti)
+         hits_totali           : 8
+         combinazioni_distinte : 3
+         lista_mismatch        : ['DCERPC su porta 49666', 'DCERPC su porta 49671', 'TLS su porta 18560']
     > M_scan   (+40 punti)
          hits_totali           : 1
          codici_rilevati       : [2]
@@ -111,8 +111,12 @@
          categoria_dominante   : SYN SCAN CLASSICO
 
 ---------------------------------------------------------------------------
-  [ !] HOST 192.168.10.8  ->  Score: 40/100  (GIALLO)
+  [!!] HOST 192.168.10.5  ->  Score: 65/100  (ROSSO)
 ---------------------------------------------------------------------------
+    > M_proto  (+25 punti)
+         hits_totali           : 4
+         combinazioni_distinte : 1
+         lista_mismatch        : ['DCERPC su porta 49666']
     > M_scan   (+40 punti)
          hits_totali           : 1
          codici_rilevati       : [2]
@@ -128,47 +132,15 @@
          codici_descritti      : ['SYN Scan']
          categoria_dominante   : SYN SCAN CLASSICO
 
----------------------------------------------------------------------------
-  [ !] HOST 192.168.10.50  ->  Score: 30/100  (GIALLO)
----------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 7
-         porte_distinte        : 7
-         lista_porte           : [56672, 23618, 60078, 61279, 5943, 47463, 19536]
-
----------------------------------------------------------------------------
-  [ !] HOST 192.168.10.51  ->  Score: 30/100  (GIALLO)
----------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
-
----------------------------------------------------------------------------
-  [ !] HOST 192.168.10.16  ->  Score: 30/100  (GIALLO)
----------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
-
----------------------------------------------------------------------------
-  [ !] HOST 192.168.10.25  ->  Score: 30/100  (GIALLO)
----------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [53]
-
----------------------------------------------------------------------------
-  [ !] HOST 192.168.10.3  ->  Score: 30/100  (GIALLO)
----------------------------------------------------------------------------
-    > M_srv    (+30 punti)
-         hits_totali           : 1
-         porte_distinte        : 1
-         lista_porte           : [389]
-
 ===========================================================================
   FINE ESECUZIONE
 ===========================================================================
 
+Friday, July 7, 2017
+Morning
+
+Botnet ARES (10:02 a.m. – 11:02 a.m.)
+
+Attacker: Kali, 205.174.165.73
+
+Victims: Win 10, 192.168.10.15 + Win 7, 192.168.10.9 + Win 10, 192.168.10.14 + Win 8, 192.168.10.5 + Vista, 192.168.10.8

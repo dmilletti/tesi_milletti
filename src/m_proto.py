@@ -43,7 +43,7 @@ import argparse
 from datetime import datetime, timezone
 
 from readconfig import (
-    connetti_clickhouse, costruisci_filtro_lan,
+    connetti_clickhouse, costruisci_filtro_lan, espr_riferimento,
     PESO_M_PROTO, FINESTRA_MINUTI_DEFAULT,
 )
 
@@ -113,6 +113,7 @@ def calcola_m_proto(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     # cli_ip, che è il "soggetto" del flusso. Applicato dentro la CTE
     # così la FASE 2 lavora già su un dataset filtrato.
     filtro_lan = costruisci_filtro_lan("cli_ip")
+    rif = espr_riferimento()
 
     query = f"""
 
@@ -131,8 +132,9 @@ def calcola_m_proto(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
 
         FROM flow_alerts_view
         WHERE
-            -- Filtro 1: finestra temporale parametrica (default 60 minuti)
-            tstamp >= now() - INTERVAL {finestra_minuti} MINUTE
+            -- Finestra temporale
+            tstamp >= {rif} - INTERVAL {finestra_minuti} MINUTE
+            AND tstamp < {rif}
 
             -- Filtro 2: bit 5 di flow_risk_bitmap acceso
             -- (NDPI_KNOWN_PROTOCOL_ON_NON_STANDARD_PORT)

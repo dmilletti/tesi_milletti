@@ -88,6 +88,15 @@ MIN_BASELINE_HOURS      = _cfg.getint("finestre", "min_baseline_hours")
 ORE_LAVORATIVE          = _tupla_int("finestre", "ore_lavorative")
 GIORNI_WEEKEND          = _tupla_int("finestre", "giorni_weekend")
 
+# =============================================================================
+# VALIDAZIONE (ancora temporale per il replay di pcap storici)
+# =============================================================================
+
+_epoch_raw = ""
+if _cfg.has_section("validazione"):
+    _epoch_raw = _cfg.get("validazione", "epoch_riferimento", fallback="").strip()
+EPOCH_RIFERIMENTO = int(_epoch_raw) if _epoch_raw not in ("", "0") else None
+
 
 # =============================================================================
 # PESI DELLE METRICHE (con peso unico non variabile)
@@ -203,6 +212,16 @@ def costruisci_filtro_esterno(colonna_ip: str) -> str:
         for rete in da_escludere
     ]
     return "(" + " AND ".join(condizioni) + ")"
+
+def espr_riferimento() -> str:
+    """
+    Espressione SQL dell'istante di riferimento delle metriche.
+    Produzione (EPOCH_RIFERIMENTO=None) -> now().
+    Replay -> toDateTime(epoch): istante ASSOLUTO, immune al fuso del server.
+    """
+    if EPOCH_RIFERIMENTO is None:
+        return "now()"
+    return f"toDateTime({EPOCH_RIFERIMENTO})"
 
 
 # =============================================================================

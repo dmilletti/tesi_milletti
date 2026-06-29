@@ -51,7 +51,7 @@ import argparse
 from datetime import datetime, timezone
 
 from readconfig import (
-    connetti_clickhouse, costruisci_filtro_lan,
+    connetti_clickhouse, costruisci_filtro_lan, espr_riferimento,
     M_REP_SOGLIA_SRV_PERSISTENTE as SOGLIA_SRV_PERSISTENTE,
     M_REP_SOGLIA_CLI_MIRATO as SOGLIA_CLI_MIRATO,
     M_REP_PESO_SRV_ISOLATO as PESO_SRV_ISOLATO,
@@ -130,7 +130,8 @@ def calcola_m_rep(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
     # mentre isIPAddressInRange() richiede una stringa: convertiamo con
     # IPv4NumToString() prima di passarla al filtro.
     filtro_lan = costruisci_filtro_lan("IPv4NumToString(IPV4_SRC_ADDR)")
-
+    rif = espr_riferimento()
+    
     query = f"""
     SELECT
         IPv4NumToString(IPV4_SRC_ADDR) AS host_ip,
@@ -163,8 +164,9 @@ def calcola_m_rep(client, finestra_minuti: int = FINESTRA_MINUTI_DEFAULT):
 
     FROM flows
     WHERE
-        -- Finestra temporale parametrica (default 60 minuti)
-        FIRST_SEEN >= now() - INTERVAL {finestra_minuti} MINUTE
+        -- Finestra temporale
+        FIRST_SEEN >= {rif} - INTERVAL {finestra_minuti} MINUTE
+        AND FIRST_SEEN < {rif}
 
         -- Escludiamo i flussi IPv6 (IPV4_SRC_ADDR = 0 nei flussi IPv6 puri)
         AND IPV4_SRC_ADDR != 0
