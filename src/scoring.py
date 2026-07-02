@@ -38,7 +38,7 @@ Esecuzione:
     $ python3 scoring.py
 =============================================================================
 """
-
+import time
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -106,16 +106,20 @@ def esegui_metrica(nome: str, etichetta: str, fn, client) -> dict:
     si prosegue con le altre.
     """
     print(f"  [run] {nome:8s} ({etichetta})...", end=" ", flush=True)
+    t0 = time.perf_counter()
     try:
         risultati = fn(client)
+        dt = time.perf_counter() - t0
         n = len(risultati)
-        print(f"OK ({n} host flaggati)")
+        print(f"OK ({n} host flaggati) [{dt*1000:.0f} ms]")
         return risultati
     except Exception as e:
         # Stampa errore ma non blocca lo script.
         # Lo stack trace va a stderr per essere visibile nei log di cron senza inquinare
         # lo stdout principale.
-        print(f"ERRORE: {e}")
+        dt = time.perf_counter() - t0
+        print(f"ERRORE dopo {dt*1000:.0f} ms: {e}")
+        #print(f"ERRORE: {e}")
         print(f"  [run] Stack trace di {nome}:", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return {}

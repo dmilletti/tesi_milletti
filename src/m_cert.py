@@ -33,7 +33,6 @@ Fonte dei dati:
 Mappa dei bit nDPI usati (verificata su nDPI, vedere risk_info nel JSON):
     bit 6  -> NDPI_TLS_SELFSIGNED_CERTIFICATE   ("Self-signed Cert")
     bit 9  -> NDPI_TLS_CERTIFICATE_EXPIRED      ("TLS Cert Expired") -> da disattivare durante i test con pcap per falsi positivi (cert scaduti ma ancora validi)
-    bit 10 -> NDPI_TLS_CERTIFICATE_MISMATCH     ("TLS Cert Mismatch") -> eliminato per falsi positivi
     bit 29 -> NDPI_MALICIOUS_SHA1_CERTIFICATE   ("Malicious SHA1 Cert")
 
 Soglie di rischio dello score finale S(h):

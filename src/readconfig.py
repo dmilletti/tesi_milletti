@@ -186,6 +186,8 @@ def connetti_clickhouse():
         database = CLICKHOUSE_DATABASE,
         username = CLICKHOUSE_USER,
         password = CLICKHOUSE_PASSWORD,
+        # Per calcolare costi di query 
+        #settings = {"log_comment": "scoring_run"},
     )
 
 
@@ -212,16 +214,6 @@ def costruisci_filtro_esterno(colonna_ip: str) -> str:
         for rete in da_escludere
     ]
     return "(" + " AND ".join(condizioni) + ")"
-
-def espr_riferimento() -> str:
-    """
-    Espressione SQL dell'istante di riferimento delle metriche.
-    Produzione (EPOCH_RIFERIMENTO=None) -> now().
-    Replay -> toDateTime(epoch): istante ASSOLUTO, immune al fuso del server.
-    """
-    if EPOCH_RIFERIMENTO is None:
-        return "now()"
-    return f"toDateTime({EPOCH_RIFERIMENTO})"
 
 
 # =============================================================================
