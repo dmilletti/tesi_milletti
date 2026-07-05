@@ -1,0 +1,19 @@
+[Unit]
+Description=Calcolo dello score di rischio degli host
+# Avvia lo scoring solo dopo che ClickHouse e la rete sono pronti
+After=clickhouse-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+# Fa l'esecuzione poi si spenge
+# Evita esecuzioni sovrapposte
+Type=oneshot
+WorkingDirectory=/home/diego/Progetti/tesi_milletti/src
+# Si usa direttamente il python del virtualenv: non serve "source activate".
+ExecStart=/home/diego/Progetti/tesi_milletti/venv/bin/python /home/diego/Progetti/tesi_milletti/src/scoring.py
+# Eseguire solo come utente non privilegiato
+User=diego
+Group=diego
+# scoring.py usa l'exit code per segnalare lo stato della rete
+# (0=Verde, 1=Giallo, 2=Rosso): non sono errori.
+SuccessExitStatus=1 2

@@ -23,7 +23,7 @@ Formula operativa (vedere documento di decisioni progettuali per i dettagli):
     Z_modified = ( V_out - mediana ) / MAD_eff <- direzionale, senza valore assoluto
 
     M_vol = 1  se e solo se:
-        Z_modified > 3              (regola 99.7%)
+        Z_modified > 3
         AND V_out > mediana        (solo picchi in eccesso)
         AND V_out > 50 MB          (esfiltrazione)
 
@@ -77,7 +77,7 @@ from readconfig import (
 #   2) baseline_grezza      -> aggrega flussi in bucket orari,
 #                              filtrati per stessa categoria dell'ora corrente
 #   3) mediane              -> per ogni host, calcola mediana e applica
-#                              il filtro cold start (>= 48 bucket)
+#                              il filtro cold start (>= 30 bucket)
 #   4) statistiche_baseline -> per ogni host, calcola la MAD usando le
 #                              mediane della CTE precedente (necessario un JOIN)
 #   5) volume_corrente      -> somma byte in uscita dell'ora corrente

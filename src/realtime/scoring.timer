@@ -1,0 +1,16 @@
+[Unit]
+Description=Avvio orario dello scoring
+
+[Timer]
+# All'inizio di ogni ora. Per lasciare a ntopng il tempo di esportare
+# i flussi dell'ora appena conclusa, usare invece: OnCalendar=*:05:00
+OnCalendar=hourly
+# Recupera un'esecuzione saltata
+Persistent=true
+# Riduce il ritardo con cui systemd fa partire il timer
+# Margine di errore di un minuto
+AccuracySec=1min
+
+# Ogni volta che accendo il pc, il timer si deve attivare in background
+[Install]
+WantedBy=timers.target
