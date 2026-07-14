@@ -215,6 +215,16 @@ def costruisci_filtro_esterno(colonna_ip: str) -> str:
     ]
     return "(" + " AND ".join(condizioni) + ")"
 
+def espr_riferimento() -> str:
+    """
+    Espressione SQL dell'istante di riferimento delle metriche.
+    Produzione (EPOCH_RIFERIMENTO=None) -> now().
+    Replay -> toDateTime(epoch): istante ASSOLUTO, immune al fuso del server.
+    """
+    if EPOCH_RIFERIMENTO is None:
+        return "now()"
+    return f"toDateTime({EPOCH_RIFERIMENTO})"
+
 
 # =============================================================================
 # AUTO-TEST DI CONTROLLO CONFIGURAZIONE
